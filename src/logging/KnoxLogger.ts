@@ -1,7 +1,7 @@
 // src/logging/KnoxLogger.ts
 // v2 - 23-09-2026 - Add concise HTTP and ASCII-safe boundary logging
 
-export type LogBoundary = "INFO" | "ERROR" | "HTTP" | "PZ->BRIDGE" | "BRIDGE->PZ" | "BRIDGE->KNOX";
+export type LogBoundary = "INFO" | "ERROR" | "HTTP" | "PZ->BRIDGE" | "BRIDGE->PZ" | "BRIDGE->KNOX" | "KNOX->BRIDGE";
 
 export class KnoxLogger {
   log(boundary: LogBoundary, message: string): void {

@@ -1,5 +1,5 @@
 // tests/KnoxSyncEngine.test.ts
-// v2 - 23-09-2026 - Verify HTTPS success, outage retention, recovery, and malformed input
+// v3 - 24-09-2026 - Add Phase 4 mission queue/deduplication/acknowledgement tests
 
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -10,13 +10,17 @@ import { DEFAULT_CONFIG } from "../src/config/KnoxBridgeConfig.js";
 import { ensureQueueDirectories, queuePaths } from "../src/files/KnoxQueue.js";
 import type { KnoxApiTransport } from "../src/http/KnoxApiClient.js";
 import { KnoxLogger } from "../src/logging/KnoxLogger.js";
-import type { GameTelemetryMessage, KnoxPingResponse, KnoxTelemetryResponse } from "../src/protocol/KnoxProtocol.js";
+import type { GameTelemetryMessage, MissionPullResponse, MissionQueuedResponse, KnoxPingResponse, KnoxTelemetryResponse, TestMission } from "../src/protocol/KnoxProtocol.js";
 import { KnoxSyncEngine } from "../src/sync/KnoxSyncEngine.js";
 
 class FakeApi implements KnoxApiTransport {
   calls = 0;
   shouldFail = false;
   telemetryMessages: GameTelemetryMessage[] = [];
+  mission: TestMission | null = null;
+  missionPulls = 0;
+  missionAcks = 0;
+  missionShouldFail = false;
 
   async sendConnectorTest(): Promise<KnoxPingResponse> {
     this.calls += 1;
@@ -29,6 +33,18 @@ class FakeApi implements KnoxApiTransport {
     this.telemetryMessages.push(message);
     if (this.shouldFail) throw new Error("simulated backend outage");
     return { ok: true, protocolVersion: 1, messageId: message.messageId };
+  }
+
+  async pullMission(): Promise<MissionPullResponse> {
+    this.missionPulls += 1;
+    if (this.missionShouldFail) throw new Error("simulated mission backend outage");
+    return { ok: true, protocolVersion: 1, mission: this.mission };
+  }
+
+  async acknowledgeMissionQueued(missionId: "test_001"): Promise<MissionQueuedResponse> {
+    this.missionAcks += 1;
+    if (this.shouldFail) throw new Error("simulated backend outage");
+    return { ok: true, protocolVersion: 1, missionId };
   }
 }
 
@@ -141,5 +157,52 @@ test("coalesces stale telemetry by sending only the newest overwritten snapshot"
     await engine.pollOnce();
     assert.equal(api.telemetryMessages.at(-1)?.messageId, "evt_newest");
     assert.equal(api.telemetryMessages.at(-1)?.payload.players[0]?.x, 99);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("queues one validated mission file and does not recreate an archived mission", async () => {
+  const api = new FakeApi();
+  api.mission = { protocolVersion: 1, missionId: "test_001", missionVersion: 1, title: "Connector Test Mission", status: "active", objective: { type: "test", text: "Verify Web to Project Zomboid mission transport." } };
+  const { exchangeDirectory, paths, engine } = await fixture(api);
+  try {
+    const config = { ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1, missionSyncEndpoint: "https://example.test", missionPollIntervalMs: 1 };
+    const missionEngine = new KnoxSyncEngine(config, new KnoxLogger(), api);
+    await missionEngine.pollOnce();
+    const pending = path.join(paths.bridgePending, "mission_test_001.json");
+    assert.equal(JSON.parse(await readFile(pending, "utf8")).missionId, "test_001");
+    assert.equal(api.missionAcks, 1);
+    await (await import("../src/files/KnoxQueue.js")).moveQueueFile(pending, paths.bridgeProcessed);
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await missionEngine.pollOnce();
+    await readFile(path.join(paths.bridgeProcessed, "mission_test_001.json"), "utf8");
+    assert.equal(api.missionAcks, 2);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("archives a locally queued mission after the PZ acknowledgement", async () => {
+  const api = new FakeApi();
+  const { exchangeDirectory, paths } = await fixture(api);
+  try {
+    const missionPath = path.join(paths.bridgePending, "mission_test_001.json");
+    await writeFile(missionPath, JSON.stringify({ protocolVersion: 1, missionId: "test_001", missionVersion: 1, title: "Connector Test Mission", status: "active", objective: { type: "test", text: "Verify Web to Project Zomboid mission transport." } }));
+    const ackPath = path.join(paths.gamePending, "evt_mission_ack.json");
+    await writeFile(ackPath, JSON.stringify({ protocolVersion: 1, messageId: "evt_mission_ack", type: "mission_received_ack", createdAt: new Date().toISOString(), payload: { missionId: "test_001" } }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const engine = new KnoxSyncEngine({ ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1 }, new KnoxLogger(), api);
+    await engine.pollOnce();
+    await readFile(path.join(paths.bridgeProcessed, "mission_test_001.json"), "utf8");
+    await readFile(path.join(paths.gameProcessed, "evt_mission_ack.json"), "utf8");
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("mission backend outage does not throw or disturb local queue processing", async () => {
+  const api = new FakeApi(); api.missionShouldFail = true;
+  const { exchangeDirectory, paths } = await fixture(api);
+  try {
+    await writeTestMessage(paths.gamePending, "evt_during_mission_outage");
+    const engine = new KnoxSyncEngine({ ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1, missionSyncEndpoint: "https://example.test", retryInitialMs: 1 }, new KnoxLogger(), api);
+    await engine.pollOnce();
+    await readFile(path.join(paths.gameProcessed, "evt_during_mission_outage.json"), "utf8");
+    assert.equal(api.missionPulls, 1);
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });

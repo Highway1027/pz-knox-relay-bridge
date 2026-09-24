@@ -8,6 +8,8 @@
   "retryMaxMs": 60000,
   "syncEndpoint": "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxConnectorPing",
   "telemetryEndpoint": "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxTelemetryIngest",
+  "missionSyncEndpoint": "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxMissionSync",
+  "missionPollIntervalMs": 5000,
   "networkId": "",
   "connectorToken": ""
 }

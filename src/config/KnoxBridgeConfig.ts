@@ -1,5 +1,5 @@
 // src/config/KnoxBridgeConfig.ts
-// v3 - 23-09-2026 - Add the dedicated Phase 3 telemetry endpoint
+// v4 - 24-09-2026 - Add Phase 4 mission polling configuration
 
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,6 +14,8 @@ export interface KnoxBridgeConfig {
   retryMaxMs: number;
   syncEndpoint: string;
   telemetryEndpoint: string;
+  missionSyncEndpoint: string;
+  missionPollIntervalMs: number;
   networkId: string;
   connectorToken: string;
 }
@@ -30,6 +32,8 @@ export const DEFAULT_CONFIG: KnoxBridgeConfig = {
   retryMaxMs: 60000,
   syncEndpoint: "",
   telemetryEndpoint: "",
+  missionSyncEndpoint: "",
+  missionPollIntervalMs: 5000,
   networkId: "",
   connectorToken: "",
 };
@@ -57,6 +61,7 @@ export async function loadConfig(configPath = path.resolve("config.json")): Prom
     pollIntervalMs: positiveInteger(raw.pollIntervalMs, DEFAULT_CONFIG.pollIntervalMs),
     stableFileAgeMs: positiveInteger(raw.stableFileAgeMs, DEFAULT_CONFIG.stableFileAgeMs),
     httpTimeoutMs: positiveInteger(raw.httpTimeoutMs, DEFAULT_CONFIG.httpTimeoutMs),
+    missionPollIntervalMs: positiveInteger(raw.missionPollIntervalMs, DEFAULT_CONFIG.missionPollIntervalMs),
     retryInitialMs: positiveInteger(raw.retryInitialMs, DEFAULT_CONFIG.retryInitialMs),
     retryMaxMs: positiveInteger(raw.retryMaxMs, DEFAULT_CONFIG.retryMaxMs),
   };

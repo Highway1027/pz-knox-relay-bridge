@@ -1,9 +1,9 @@
 <!-- README.md -->
-<!-- v3 - 23-09-2026 - Document Phase 3 coalesced game telemetry -->
+<!-- v5 - 24-09-2026 - Mark Phase 4 mission transport runtime-verified -->
 
 # Knox Relay Bridge
 
-Transport-only companion for the private Knox Relay Project Zomboid server. It retains the proven connector ping and posts the latest validated Project Zomboid telemetry snapshot to one configured Knox Network. It contains no gameplay authority.
+Transport-only companion for the private Knox Relay Project Zomboid server. It retains the proven ping/telemetry paths and polls one authenticated Network for the fixed Phase 4 connector test mission. It contains no gameplay authority.
 
 ## Setup
 
@@ -29,6 +29,8 @@ The default exchange root is `%USERPROFILE%\Zomboid\Lua\KnoxRelay`.
 
 Set `telemetryEndpoint`, `networkId`, and `connectorToken` in ignored `config.json`. `networkId` is the selected `knoxRelayFiles` document ID. The plaintext token remains local; only its SHA-256 hash belongs in that Network's `connectorTokenHash` field.
 
+Phase 4 also requires `missionSyncEndpoint`; the example points to `knoxMissionSync`.
+
 ## Current stop point
 
 The Phase 2 manual gate expects:
@@ -40,4 +42,4 @@ The Phase 2 manual gate expects:
 [Knox Relay] Backend replied: hello from Knox Relay
 ```
 
-Phase 3 is prepared but `knoxTelemetryIngest` must not be deployed without explicit approval. Do not begin missions until the real B42.20.4 telemetry gate passes.
+Phase 4 passed in real B42.20.4: delivery, PZ acknowledgement, restart deduplication, and repeated-action deduplication were verified. Work stops before Phase 5; no mission gameplay or PZ mission UI exists.

@@ -1,13 +1,15 @@
 // src/http/KnoxApiClient.ts
-// v1 - 23-09-2026 - Send bounded asynchronous Phase 2 HTTPS ping requests
+// v2 - 24-09-2026 - Add authenticated Phase 4 mission pull/queued requests
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse } from "../protocol/KnoxProtocol.js";
-import { validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse } from "../protocol/KnoxProtocol.js";
+import { validateMissionPullResponse, validateMissionQueuedResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
   sendConnectorTest(message: "hello from Project Zomboid"): Promise<KnoxPingResponse>;
   sendTelemetry(message: GameTelemetryMessage): Promise<KnoxTelemetryResponse>;
+  pullMission(): Promise<MissionPullResponse>;
+  acknowledgeMissionQueued(missionId: "test_001"): Promise<MissionQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -67,5 +69,39 @@ export class KnoxApiClient implements KnoxApiTransport {
     } catch (error) {
       throw new Error(`invalid backend response: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  async pullMission(): Promise<MissionPullResponse> {
+    return validateMissionPullResponse(await this.missionRequest({ action: "pull" }));
+  }
+
+  async acknowledgeMissionQueued(missionId: "test_001"): Promise<MissionQueuedResponse> {
+    return validateMissionQueuedResponse(await this.missionRequest({ action: "queued", missionId }));
+  }
+
+  private async missionRequest(action: { action: "pull" } | { action: "queued"; missionId: "test_001" }): Promise<unknown> {
+    if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
+    if (!this.config.networkId) throw new Error("networkId is not configured");
+    if (!this.config.connectorToken) throw new Error("connectorToken is not configured");
+    let response: Response;
+    try {
+      response = await fetch(this.config.missionSyncEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Knox-Connector-Token": this.config.connectorToken },
+        body: JSON.stringify({
+          protocolVersion: KNOX_PROTOCOL_VERSION,
+          connectorVersion: this.config.connectorVersion,
+          networkId: this.config.networkId,
+          ...action,
+        }),
+        signal: AbortSignal.timeout(this.config.httpTimeoutMs),
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "NetworkError";
+      throw new Error(name === "TimeoutError" ? `request timed out after ${this.config.httpTimeoutMs}ms` : `network request failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!response.ok) throw new Error(`backend returned HTTP ${response.status}`);
+    try { return await response.json(); }
+    catch (error) { throw new Error(`invalid backend response: ${error instanceof Error ? error.message : String(error)}`); }
   }
 }

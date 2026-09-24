@@ -1,5 +1,5 @@
 // src/index.ts
-// v2 - 23-09-2026 - Start the Phase 2 HTTPS-enabled Knox Relay Bridge
+// v3 - 24-09-2026 - Start the telemetry and mission transport Bridge
 
 import { loadConfig } from "./config/KnoxBridgeConfig.js";
 import { KnoxLogger } from "./logging/KnoxLogger.js";
@@ -11,7 +11,7 @@ try {
   const config = await loadConfig();
   const engine = new KnoxSyncEngine(config, logger);
   await engine.initialize();
-  logger.info(`Knox Bridge v${config.connectorVersion} starting (Phase 2 HTTPS ping)`);
+  logger.info(`Knox Bridge v${config.connectorVersion} starting (telemetry + mission transport)`);
   engine.start();
 
   const shutdown = (): void => {

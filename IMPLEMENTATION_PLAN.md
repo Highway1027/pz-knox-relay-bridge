@@ -1,5 +1,5 @@
 <!-- IMPLEMENTATION_PLAN.md -->
-<!-- v3 - 23-09-2026 - Mark Phase 2 passed and Phase 3 prepared -->
+<!-- v6 - 24-09-2026 - Split Phase 5 display and gameplay-authority proofs -->
 
 # Knox Relay bridge implementation plan
 
@@ -11,9 +11,19 @@ Work advances one tested phase at a time. Each phase ends with changed files gro
 2. Phase 1: prove the offline PZ-to-Bridge-to-PZ local message round trip.
 3. Phase 2: after explicit deployment approval, prove the HTTPS ping round trip.
 4. Phase 3: minimal coalesced live telemetry, dedicated backend ingest, and verified-data web panel.
-5. Later phases: test mission, mission panel, `deliver_items`, then rewards.
+5. Phase 4: fixed test-mission web-to-PZ transport proof.
+6. Phase 5A: PZ-owned durable mission cache and read-only native client panel.
+7. Phase 5B: explicit-recipient, server-authoritative, idempotent vanilla-item grant proof.
+8. Later phases: real mission mechanics, Drop Box, and rewards.
 
-Phases 1 and 2 passed in B42.20. Phase 3 implementation is prepared and stops before deployment/runtime approval. No mission gameplay or rewards are included.
+Phases 1–4 passed in real B42.20.4 multiplayer. Phase 5A is implemented only to its
+deployment/install gate and still requires real runtime confirmation. Phase 5B must not
+begin before that confirmation. No mission mechanics or rewards are included.
+
+Phase 5B will use an explicit stable B42.20.4 recipient identity from the first one-player
+test, never "the only connected player." Offline recipients remain pending and must never
+fall back to another player. `test_reward_001` and `test_reward_002` remain separate,
+immutable idempotency tests. Exact identity/item APIs will be verified before implementation.
 
 ## Strict workspace ownership
 

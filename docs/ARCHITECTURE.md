@@ -1,5 +1,5 @@
 <!-- docs/ARCHITECTURE.md -->
-<!-- v3 - 23-09-2026 - Add bounded latest-snapshot telemetry semantics -->
+<!-- v4 - 24-09-2026 - Add Phase 4 mission pull and local acknowledgement -->
 
 # Architecture
 
@@ -26,6 +26,8 @@ Only a validated response permits the Bridge to atomically write the PZ acknowle
 ## Failure isolation
 
 PZ never waits for either the Bridge or HTTP. Backend failure affects only Bridge retry state. Expected outages use concise logs without stack traces.
+
+Mission polling uses the same bounded HTTP timeout and capped retry backoff. A mission is acknowledged to the backend only after its local file exists. PZ never contacts the backend; its local acknowledgement lets the Bridge archive the file.
 
 ## Telemetry coalescing
 

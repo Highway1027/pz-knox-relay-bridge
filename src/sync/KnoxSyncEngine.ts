@@ -1,5 +1,5 @@
 // src/sync/KnoxSyncEngine.ts
-// v3 - 23-09-2026 - Add coalesced latest-snapshot telemetry delivery
+// v4 - 24-09-2026 - Add deduplicated backend-to-PZ test mission delivery
 
 import { access } from "node:fs/promises";
 import path from "node:path";
@@ -7,8 +7,8 @@ import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestAcknowledgement, type ConnectorTestMessage } from "../protocol/KnoxProtocol.js";
-import { validateConnectorTest, validateGameTelemetry } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
+import { validateConnectorTest, validateGameTelemetry, validateMissionReceivedAcknowledgement } from "../protocol/KnoxValidators.js";
 
 async function exists(filePath: string): Promise<boolean> {
   try {
@@ -27,6 +27,9 @@ export class KnoxSyncEngine {
   private backendOnline: boolean | undefined;
   private lastTelemetryMessageId?: string;
   private telemetryRetry = { messageId: "", attempts: 0, retryAt: 0 };
+  private nextMissionPollAt = 0;
+  private missionRetryAttempts = 0;
+  private missionBackendOnline: boolean | undefined;
 
   constructor(
     private readonly config: KnoxBridgeConfig,
@@ -48,6 +51,7 @@ export class KnoxSyncEngine {
       const files = await listStableJsonFiles(this.paths.gamePending, this.config.stableFileAgeMs);
       for (const filePath of files) await this.processFile(filePath);
       await this.processTelemetrySnapshot();
+      await this.pollMission();
     } finally {
       this.polling = false;
     }
@@ -62,9 +66,13 @@ export class KnoxSyncEngine {
     if (this.timer) clearInterval(this.timer);
   }
 
-  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | undefined> {
+  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | undefined> {
     try {
-      return validateConnectorTest(await readJsonFile(filePath));
+      const value = await readJsonFile(filePath);
+      const type = (value as { type?: unknown } | null)?.type;
+      if (type === "connector_test") return validateConnectorTest(value);
+      if (type === "mission_received_ack") return validateMissionReceivedAcknowledgement(value);
+      throw new Error("unsupported message type");
     } catch (error) {
       this.logger.error(`${path.basename(filePath)} failed validation: ${error instanceof Error ? error.message : String(error)}`);
       try {
@@ -83,6 +91,14 @@ export class KnoxSyncEngine {
 
     const message = await this.readAndValidate(filePath);
     if (!message) return;
+    if (message.type === "mission_received_ack") {
+      const missionFile = path.join(this.paths.bridgePending, `mission_${message.payload.missionId}.json`);
+      if (await exists(missionFile)) await moveQueueFile(missionFile, this.paths.bridgeProcessed);
+      await moveQueueFile(filePath, this.paths.gameProcessed);
+      this.retryState.delete(fileName);
+      this.logger.log("PZ->BRIDGE", `mission ${message.payload.missionId} acknowledged`);
+      return;
+    }
 
     const acknowledgementPath = path.join(this.paths.bridgePending, `ack_${message.messageId}.json`);
     this.logger.log("PZ->BRIDGE", `${message.type} ${message.messageId}`);
@@ -150,6 +166,35 @@ export class KnoxSyncEngine {
       if (this.backendOnline !== false) this.logger.log("HTTP", "Knox Relay OFFLINE");
       this.backendOnline = false;
       this.logger.error(`${message.messageId} latest telemetry retained for retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async pollMission(): Promise<void> {
+    if (!this.config.missionSyncEndpoint || Date.now() < this.nextMissionPollAt) return;
+    this.nextMissionPollAt = Date.now() + this.config.missionPollIntervalMs;
+    try {
+      const response = await this.api.pullMission();
+      if (this.missionBackendOnline === false) this.logger.log("HTTP", "mission sync ONLINE");
+      this.missionBackendOnline = true;
+      this.missionRetryAttempts = 0;
+      if (!response.mission) return;
+      const mission = response.mission;
+      this.logger.log("KNOX->BRIDGE", `mission ${mission.missionId} received`);
+      const fileName = `mission_${mission.missionId}.json`;
+      const pendingPath = path.join(this.paths.bridgePending, fileName);
+      const processedPath = path.join(this.paths.bridgeProcessed, fileName);
+      if (!(await exists(pendingPath)) && !(await exists(processedPath))) {
+        await atomicWriteJson(pendingPath, mission);
+        this.logger.log("BRIDGE->PZ", `mission ${mission.missionId} queued`);
+      }
+      await this.api.acknowledgeMissionQueued(mission.missionId);
+    } catch (error) {
+      this.missionRetryAttempts += 1;
+      const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.missionRetryAttempts - 1, 20)), this.config.retryMaxMs);
+      this.nextMissionPollAt = Date.now() + delay;
+      if (this.missionBackendOnline !== false) this.logger.log("HTTP", "mission sync OFFLINE");
+      this.missionBackendOnline = false;
+      this.logger.error(`mission sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

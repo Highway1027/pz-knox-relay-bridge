@@ -1,7 +1,7 @@
 // src/protocol/KnoxValidators.ts
 // v2 - 23-09-2026 - Validate local input and the Phase 2 backend response
 
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type TestMission } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -64,4 +64,43 @@ export function validateTelemetryResponse(value: unknown, messageId: string): Kn
   const response = value as Record<string, unknown>;
   if (response.ok !== true || response.protocolVersion !== 1 || response.messageId !== messageId) throw new Error("backend did not acknowledge telemetry");
   return response as unknown as KnoxTelemetryResponse;
+}
+
+export function validateTestMission(value: unknown): TestMission {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("mission must be an object");
+  const mission = value as Record<string, unknown>;
+  if (!exactKeys(mission, ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective"])) throw new Error("unexpected mission fields");
+  const objective = mission.objective as Record<string, unknown>;
+  if (mission.protocolVersion !== 1 || mission.missionId !== "test_001" || mission.missionVersion !== 1 || mission.title !== "Connector Test Mission" || mission.status !== "active" ||
+      !objective || typeof objective !== "object" || Array.isArray(objective) || !exactKeys(objective, ["type", "text"]) ||
+      objective.type !== "test" || objective.text !== "Verify Web to Project Zomboid mission transport.") {
+    throw new Error("invalid test mission");
+  }
+  return mission as unknown as TestMission;
+}
+
+export function validateMissionPullResponse(value: unknown): MissionPullResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (!exactKeys(response, ["ok", "protocolVersion", "mission"]) || response.ok !== true || response.protocolVersion !== 1) throw new Error("invalid mission pull response");
+  if (response.mission !== null) validateTestMission(response.mission);
+  return response as unknown as MissionPullResponse;
+}
+
+export function validateMissionQueuedResponse(value: unknown): MissionQueuedResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (response.ok !== true || response.protocolVersion !== 1 || response.missionId !== "test_001") throw new Error("backend did not acknowledge queued mission");
+  return response as unknown as MissionQueuedResponse;
+}
+
+export function validateMissionReceivedAcknowledgement(value: unknown): MissionReceivedAcknowledgement {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("message root must be an object");
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  if (!exactKeys(message, ["protocolVersion", "messageId", "type", "createdAt", "payload"]) || message.protocolVersion !== 1 ||
+      message.type !== "mission_received_ack" || typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !payload || typeof payload !== "object" ||
+      Array.isArray(payload) || !exactKeys(payload, ["missionId"]) || payload.missionId !== "test_001") throw new Error("invalid mission acknowledgement");
+  return message as unknown as MissionReceivedAcknowledgement;
 }
