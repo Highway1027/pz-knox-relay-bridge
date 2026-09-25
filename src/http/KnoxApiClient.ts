@@ -1,5 +1,5 @@
 // src/http/KnoxApiClient.ts
-// v3 - 25-09-2026 - Carry Phase 6B area missions through existing HTTPS sync
+// v4 - 25-09-2026 - Relay authoritative mission completions for prerequisites
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse } from "../protocol/KnoxProtocol.js";
@@ -10,6 +10,7 @@ export interface KnoxApiTransport {
   sendTelemetry(message: GameTelemetryMessage): Promise<KnoxTelemetryResponse>;
   pullMission(): Promise<MissionPullResponse>;
   acknowledgeMissionQueued(missionId: MissionId): Promise<MissionQueuedResponse>;
+  acknowledgeMissionCompleted(missionId: MissionId): Promise<MissionQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -79,7 +80,11 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateMissionQueuedResponse(await this.missionRequest({ action: "queued", missionId }));
   }
 
-  private async missionRequest(action: { action: "pull" } | { action: "queued"; missionId: MissionId }): Promise<unknown> {
+  async acknowledgeMissionCompleted(missionId: MissionId): Promise<MissionQueuedResponse> {
+    return validateMissionQueuedResponse(await this.missionRequest({ action: 'completed', missionId }));
+  }
+
+  private async missionRequest(action: { action: "pull" } | { action: "queued" | "completed"; missionId: MissionId }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");
     if (!this.config.connectorToken) throw new Error("connectorToken is not configured");

@@ -1,7 +1,7 @@
 // src/protocol/KnoxValidators.ts
-// v3 - 25-09-2026 - Strictly validate Phase 6B area fixtures
+// v4 - 25-09-2026 - Strictly validate verified-location visit missions
 
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -77,7 +77,7 @@ const MISSIONS = {
 } as const;
 
 function isMissionId(value: unknown): value is MissionId {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(MISSIONS, value);
+  return typeof value === "string" && (Object.prototype.hasOwnProperty.call(MISSIONS, value) || /^mission_v0_(muldraugh_checkin|fallas_recon|echo_recon|march_recon|westpoint_recon)$/.test(value));
 }
 
 function exactJson(left: unknown, right: unknown): boolean {
@@ -101,9 +101,27 @@ function validAreaObjective(value: unknown, expected: (typeof MISSIONS)["test_00
 export function validateTestMission(value: unknown): ConnectorMission {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("mission must be an object");
   const mission = value as Record<string, unknown>;
-  if (!exactKeys(mission, ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture"])) throw new Error("unexpected mission fields");
+  const curated = typeof mission.missionId === 'string' && mission.missionId.startsWith('mission_v0_');
+  if (!exactKeys(mission, curated
+    ? ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture", "location", "chain", "narrative"]
+    : ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture"])) throw new Error("unexpected mission fields");
   if (!isMissionId(mission.missionId)) throw new Error("invalid test mission ID");
-  const expected = MISSIONS[mission.missionId];
+  if (curated) {
+    const objective = mission.objective as Record<string, unknown>;
+    const area = objective?.area as Record<string, unknown>;
+    const location = mission.location as Record<string, unknown>;
+    const chain = mission.chain as Record<string, unknown>;
+    const narrative = mission.narrative as Record<string, unknown>;
+    if (mission.protocolVersion !== 1 || mission.missionVersion !== 1 || mission.status !== 'available' || mission.testFixture !== null ||
+        !objective || objective.type !== 'visit_area' || typeof objective.text !== 'string' || !area || area.type !== 'radius' ||
+        ![area.x, area.y, area.z, area.radius].every((entry) => typeof entry === 'number' && Number.isFinite(entry)) ||
+        typeof area.name !== 'string' || !location || typeof location.locationId !== 'string' || typeof location.town !== 'string' ||
+        !chain || typeof chain.chainId !== 'string' || !Number.isInteger(chain.stage) || !Array.isArray(chain.requiresCompleted) ||
+        !narrative || !['briefing', 'shortObjective', 'arrivalMessage', 'completionMessage'].every((key) => typeof narrative[key] === 'string'))
+      throw new Error('invalid curated visit mission');
+    return mission as unknown as ConnectorMission;
+  }
+  const expected = MISSIONS[mission.missionId as keyof typeof MISSIONS];
   const objectiveValid = mission.missionId === "test_006" || mission.missionId === "test_007"
     ? validAreaObjective(mission.objective, MISSIONS[mission.missionId])
     : exactJson(mission.objective, expected.objective);
@@ -139,4 +157,17 @@ export function validateMissionReceivedAcknowledgement(value: unknown): MissionR
       typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !payload || typeof payload !== "object" ||
       Array.isArray(payload) || !exactKeys(payload, ["missionId"]) || !isMissionId(payload.missionId)) throw new Error("invalid mission acknowledgement");
   return message as unknown as MissionReceivedAcknowledgement;
+}
+
+export function validateMissionCompleted(value: unknown): MissionCompletedMessage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('message root must be an object');
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  if (!exactKeys(message, ['protocolVersion', 'messageId', 'type', 'createdAt', 'payload']) || message.protocolVersion !== 1 ||
+      message.type !== 'mission_completed' || typeof message.messageId !== 'string' || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== 'string' || Number.isNaN(Date.parse(message.createdAt)) || !payload || Array.isArray(payload) ||
+      !exactKeys(payload, ['missionId', 'missionVersion', 'objectiveType', 'completedBy']) || !isMissionId(payload.missionId) ||
+      payload.missionVersion !== 1 || payload.objectiveType !== 'visit_area' || typeof payload.completedBy !== 'string')
+    throw new Error('invalid mission completion');
+  return message as unknown as MissionCompletedMessage;
 }

@@ -1,5 +1,5 @@
 // tests/KnoxSyncEngine.test.ts
-// v4 - 25-09-2026 - Cover Phase 6B mission transport without changing queue semantics
+// v5 - 25-09-2026 - Support completion acknowledgement transport
 
 import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -44,6 +44,12 @@ class FakeApi implements KnoxApiTransport {
   async acknowledgeMissionQueued(missionId: MissionId): Promise<MissionQueuedResponse> {
     this.missionAcks += 1;
     if (this.shouldFail) throw new Error("simulated backend outage");
+    return { ok: true, protocolVersion: 1, missionId };
+  }
+
+  async acknowledgeMissionCompleted(missionId: MissionId): Promise<MissionQueuedResponse> {
+    this.missionAcks += 1;
+    if (this.shouldFail) throw new Error('simulated backend outage');
     return { ok: true, protocolVersion: 1, missionId };
   }
 }

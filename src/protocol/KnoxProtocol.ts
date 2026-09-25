@@ -1,5 +1,5 @@
 // src/protocol/KnoxProtocol.ts
-// v5 - 25-09-2026 - Add Phase 6B delivery-area mission contracts
+// v6 - 25-09-2026 - Add verified-location visit-area mission contracts
 
 export const KNOX_PROTOCOL_VERSION = 1 as const;
 
@@ -67,7 +67,9 @@ export interface KnoxTelemetryResponse {
   messageId: string;
 }
 
-export type MissionId = "test_001" | "test_002" | "test_003" | "test_004" | "test_005" | "test_006" | "test_007";
+export type MissionId = "test_001" | "test_002" | "test_003" | "test_004" | "test_005" | "test_006" | "test_007"
+  | "mission_v0_muldraugh_checkin" | "mission_v0_fallas_recon" | "mission_v0_echo_recon"
+  | "mission_v0_march_recon" | "mission_v0_westpoint_recon";
 
 export interface DeliveryArea {
   type: "radius";
@@ -75,6 +77,15 @@ export interface DeliveryArea {
   y: number;
   z: number;
   radius: 20;
+  name: string;
+}
+
+export interface VisitArea {
+  type: "radius";
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
   name: string;
 }
 
@@ -93,9 +104,13 @@ export interface ConnectorMission {
   status: "available" | "active";
   objective:
     | { type: "test"; text: string }
-    | { type: "deliver_items"; text: string; requirements: Array<{ itemType: string; quantity: number }>; deliveryArea: DeliveryArea | null };
+    | { type: "deliver_items"; text: string; requirements: Array<{ itemType: string; quantity: number }>; deliveryArea: DeliveryArea | null }
+    | { type: "visit_area"; text: string; area: VisitArea };
   reward: MissionReward | null;
   testFixture: { provisionRequirementsOnAccept: true; kind?: "nearby" | "distant" } | null;
+  location?: { locationId: string; name: string; town: string };
+  chain?: { chainId: string; stage: number; requiresCompleted: string[] };
+  narrative?: { briefing: string; shortObjective: string; arrivalMessage: string; completionMessage: string };
 }
 
 export interface MissionPullResponse {
@@ -116,4 +131,12 @@ export interface MissionReceivedAcknowledgement {
   type: "mission_received_ack";
   createdAt: string;
   payload: { missionId: MissionId };
+}
+
+export interface MissionCompletedMessage {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: string;
+  type: "mission_completed";
+  createdAt: string;
+  payload: { missionId: MissionId; missionVersion: 1; objectiveType: "visit_area"; completedBy: string };
 }
