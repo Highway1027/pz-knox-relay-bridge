@@ -1,15 +1,15 @@
 // src/http/KnoxApiClient.ts
-// v2 - 24-09-2026 - Add authenticated Phase 4 mission pull/queued requests
+// v3 - 25-09-2026 - Carry Phase 6B area missions through existing HTTPS sync
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse } from "../protocol/KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse } from "../protocol/KnoxProtocol.js";
 import { validateMissionPullResponse, validateMissionQueuedResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
   sendConnectorTest(message: "hello from Project Zomboid"): Promise<KnoxPingResponse>;
   sendTelemetry(message: GameTelemetryMessage): Promise<KnoxTelemetryResponse>;
   pullMission(): Promise<MissionPullResponse>;
-  acknowledgeMissionQueued(missionId: "test_001"): Promise<MissionQueuedResponse>;
+  acknowledgeMissionQueued(missionId: MissionId): Promise<MissionQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -75,11 +75,11 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateMissionPullResponse(await this.missionRequest({ action: "pull" }));
   }
 
-  async acknowledgeMissionQueued(missionId: "test_001"): Promise<MissionQueuedResponse> {
+  async acknowledgeMissionQueued(missionId: MissionId): Promise<MissionQueuedResponse> {
     return validateMissionQueuedResponse(await this.missionRequest({ action: "queued", missionId }));
   }
 
-  private async missionRequest(action: { action: "pull" } | { action: "queued"; missionId: "test_001" }): Promise<unknown> {
+  private async missionRequest(action: { action: "pull" } | { action: "queued"; missionId: MissionId }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");
     if (!this.config.connectorToken) throw new Error("connectorToken is not configured");

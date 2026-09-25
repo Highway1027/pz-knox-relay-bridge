@@ -1,9 +1,9 @@
 <!-- README.md -->
-<!-- v5 - 24-09-2026 - Mark Phase 4 mission transport runtime-verified -->
+<!-- v8 - 25-09-2026 - Document strict Phase 6B area mission transport -->
 
 # Knox Relay Bridge
 
-Transport-only companion for the private Knox Relay Project Zomboid server. It retains the proven ping/telemetry paths and polls one authenticated Network for the fixed Phase 4 connector test mission. It contains no gameplay authority.
+Transport-only companion for the private Knox Relay Project Zomboid server. It retains the proven ping/telemetry paths and polls one authenticated Network for five fixed versioned test missions. It strictly validates the test_005 deliver_items requirements, reward, and explicit test-fixture metadata, but contains no acceptance, completion, inventory, or reward authority.
 
 ## Setup
 
@@ -31,7 +31,7 @@ Set `telemetryEndpoint`, `networkId`, and `connectorToken` in ignored `config.js
 
 Phase 4 also requires `missionSyncEndpoint`; the example points to `knoxMissionSync`.
 
-## Current stop point
+## Runtime status
 
 The Phase 2 manual gate expects:
 
@@ -42,4 +42,7 @@ The Phase 2 manual gate expects:
 [Knox Relay] Backend replied: hello from Knox Relay
 ```
 
-Phase 4 passed in real B42.20.4: delivery, PZ acknowledgement, restart deduplication, and repeated-action deduplication were verified. Work stops before Phase 5; no mission gameplay or PZ mission UI exists.
+Phase 4 passed in real B42.20.4: delivery, PZ acknowledgement, restart deduplication, and repeated-action deduplication were verified. Phase 5B generalizes that same transport only enough for fixed test_001 through test_004; PZ server Lua remains the sole completion and reward authority.
+## Phase 6B area fixtures
+
+Mission transport accepts the fixed `test_006` and `test_007` schemas, including a strict radius-20 `deliveryArea` snapshot. The Bridge validates bounded integer coordinates and writes the validated mission unchanged through the existing atomic local queue. It does not choose locations, teleport players, or infer map safety. The `test_007` `X + 200` target is deterministic development data only and may contain unusable terrain.

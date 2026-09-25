@@ -1,5 +1,5 @@
 // src/protocol/KnoxProtocol.ts
-// v4 - 24-09-2026 - Add the Phase 4 test-mission transport contracts
+// v5 - 25-09-2026 - Add Phase 6B delivery-area mission contracts
 
 export const KNOX_PROTOCOL_VERSION = 1 as const;
 
@@ -67,28 +67,47 @@ export interface KnoxTelemetryResponse {
   messageId: string;
 }
 
-export interface TestMission {
+export type MissionId = "test_001" | "test_002" | "test_003" | "test_004" | "test_005" | "test_006" | "test_007";
+
+export interface DeliveryArea {
+  type: "radius";
+  x: number;
+  y: number;
+  z: number;
+  radius: 20;
+  name: string;
+}
+
+export type MissionReward =
+  | { type: "item"; rewardId: "test_reward_item_001"; itemFullType: "Base.Bandage"; quantity: 1 }
+  | { type: "xp"; rewardId: "test_reward_xp_001"; perk: "Woodwork"; amount: 100 }
+  | { type: "xp"; rewardId: "test_reward_xp_002"; perk: "Woodwork"; amount: 50 }
+  | { type: "xp"; rewardId: "test_reward_xp_003" | "test_reward_xp_004"; perk: "Woodwork"; amount: 50 }
+  | { type: "world_xp_multiplier"; rewardId: "test_reward_world_xp_001"; delta: 0.1 };
+
+export interface ConnectorMission {
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;
-  missionId: "test_001";
+  missionId: MissionId;
   missionVersion: 1;
-  title: "Connector Test Mission";
-  status: "active";
-  objective: {
-    type: "test";
-    text: "Verify Web to Project Zomboid mission transport.";
-  };
+  title: string;
+  status: "available" | "active";
+  objective:
+    | { type: "test"; text: string }
+    | { type: "deliver_items"; text: string; requirements: Array<{ itemType: string; quantity: number }>; deliveryArea: DeliveryArea | null };
+  reward: MissionReward | null;
+  testFixture: { provisionRequirementsOnAccept: true; kind?: "nearby" | "distant" } | null;
 }
 
 export interface MissionPullResponse {
   ok: true;
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;
-  mission: TestMission | null;
+  mission: ConnectorMission | null;
 }
 
 export interface MissionQueuedResponse {
   ok: true;
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;
-  missionId: "test_001";
+  missionId: MissionId;
 }
 
 export interface MissionReceivedAcknowledgement {
@@ -96,5 +115,5 @@ export interface MissionReceivedAcknowledgement {
   messageId: string;
   type: "mission_received_ack";
   createdAt: string;
-  payload: { missionId: "test_001" };
+  payload: { missionId: MissionId };
 }
