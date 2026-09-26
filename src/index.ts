@@ -1,17 +1,23 @@
 // src/index.ts
-// v3 - 24-09-2026 - Start the telemetry and mission transport Bridge
+// v4 - 26-09-2026 - Add portable first-run setup and safe startup diagnostics
 
 import { loadConfig } from "./config/KnoxBridgeConfig.js";
+import { startupDiagnostics, validateExchangeParent } from "./diagnostics/KnoxDiagnostics.js";
 import { KnoxLogger } from "./logging/KnoxLogger.js";
+import { ensureCredentials } from "./setup/KnoxSetup.js";
 import { KnoxSyncEngine } from "./sync/KnoxSyncEngine.js";
 
 const logger = new KnoxLogger();
 
 try {
+  await ensureCredentials();
   const config = await loadConfig();
+  for (const line of startupDiagnostics(config)) logger.info(line);
+  await validateExchangeParent(config);
   const engine = new KnoxSyncEngine(config, logger);
   await engine.initialize();
-  logger.info(`Knox Bridge v${config.connectorVersion} starting (telemetry + mission transport)`);
+  logger.info("Exchange directory available");
+  logger.info(`Knox Bridge v${config.connectorVersion} ready (telemetry + mission transport)`);
   engine.start();
 
   const shutdown = (): void => {

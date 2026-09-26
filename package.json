@@ -2,17 +2,37 @@
   "name": "knox-relay-bridge",
   "version": "0.1.0",
   "private": true,
+  "author": "Knox Relay",
   "description": "Transport-only local bridge between Project Zomboid and Knox Relay",
   "type": "module",
+  "main": "dist/src/desktop/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prestart": "npm run build",
     "start": "node dist/src/index.js",
+    "bridge": "npm start",
+    "desktop": "npm run build && electron .",
+    "desktop:pack": "npm run build && electron-builder --dir",
+    "desktop:win": "npm run build && electron-builder --win",
+    "desktop:mac": "npm run build && electron-builder --mac",
     "dev": "tsx src/index.ts",
-    "test": "npm run build && node --test dist/tests/KnoxApiClient.test.js dist/tests/KnoxSyncEngine.test.js"
+    "doctor": "npm run build --silent && node dist/src/doctor.js",
+    "test": "npm run build && node --test dist/tests/*.test.js"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
+  },
+  "build": {
+    "appId": "com.knoxrelay.bridge",
+    "productName": "Knox Relay Bridge",
+    "files": ["dist/**/*", "desktop/**/*", "package.json"],
+    "directories": { "output": "release" },
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg", "category": "public.app-category.utilities" },
+    "linux": { "target": "AppImage", "category": "Utility" }
   }
 }

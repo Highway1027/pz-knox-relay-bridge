@@ -1,5 +1,5 @@
 <!-- docs/TESTING.md -->
-<!-- v6 - 24-09-2026 - Add Phase 5A schema verification notes -->
+<!-- v7 - 26-09-2026 - Document first-run configuration workflow -->
 
 # Testing
 
@@ -7,7 +7,7 @@
 
 ## Manual B42.20.4 telemetry gate
 
-1. After deployment approval, configure the exact telemetry endpoint, selected Network ID, and token in ignored `config.json`.
+1. After deployment approval, run `npm start` and enter the selected Network ID and token in the first-run wizard, or supply the documented environment variables.
 2. Install the current Connector, start the Bridge, then start the B42.20.4 coop server.
 3. Join and move; confirm Bridge logs `game_telemetry` and `telemetry accepted`.
 4. Confirm `knoxRelayFiles/{networkId}/gameTelemetry/current` changes and the web panel shows the same character and coordinates.

@@ -1,7 +1,9 @@
 <!-- docs/ARCHITECTURE.md -->
-<!-- v4 - 24-09-2026 - Add Phase 4 mission pull and local acknowledgement -->
+<!-- v6 - 26-09-2026 - Add Electron shell around shared transport runtime -->
 
 # Architecture
+
+The Electron desktop shell is an orchestration layer, not a second transport implementation. Its main process creates existing `KnoxSyncEngine` instances from securely stored connection profiles, forwards structured sanitized logs over context-isolated IPC, and reuses the same Doctor functions as CLI mode. The renderer has no Node integration or gameplay authority. Closing the app stops all engine timers.
 
 ```text
 Project Zomboid server Lua
@@ -15,7 +17,7 @@ The Bridge owns transport only. Project Zomboid owns physical truth and gameplay
 
 ## Local boundary
 
-The exchange root is `%USERPROFILE%/Zomboid/Lua/KnoxRelay`. PZ writes and closes a known-name JSON document. The Bridge waits for file stability, validates it, and uses temporary-file-plus-rename for atomic responses. Malformed local input moves to `failed`.
+The automatic exchange root is `path.join(os.homedir(), "Zomboid", "Lua", "KnoxRelay")`, using the platform path implementation. `KNOX_EXCHANGE_ROOT`, then the local `exchangeRoot` (or legacy `exchangeDirectory`) field, can override it. PZ writes and closes a known-name JSON document. The Bridge waits for file stability, validates it, and uses temporary-file-plus-rename for atomic responses. Malformed local input moves to `failed`.
 
 ## HTTPS delivery
 

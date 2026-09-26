@@ -1,5 +1,5 @@
 // src/sync/KnoxSyncEngine.ts
-// v6 - 26-09-2026 - Relay durable mission completion and decline events
+// v7 - 26-09-2026 - Stop desktop polling cleanly between transport stages
 
 import { access } from "node:fs/promises";
 import path from "node:path";
@@ -23,6 +23,7 @@ export class KnoxSyncEngine {
   private readonly paths;
   private timer?: NodeJS.Timeout;
   private polling = false;
+  private running = true;
   private readonly retryState = new Map<string, { attempts: number; retryAt: number }>();
   private backendOnline: boolean | undefined;
   private lastTelemetryMessageId?: string;
@@ -50,7 +51,9 @@ export class KnoxSyncEngine {
     try {
       const files = await listStableJsonFiles(this.paths.gamePending, this.config.stableFileAgeMs);
       for (const filePath of files) await this.processFile(filePath);
+      if (!this.running) return;
       await this.processTelemetrySnapshot();
+      if (!this.running) return;
       await this.pollMission();
     } finally {
       this.polling = false;
@@ -58,11 +61,13 @@ export class KnoxSyncEngine {
   }
 
   start(): void {
+    this.running = true;
     this.timer = setInterval(() => void this.pollOnce().catch((error) => this.logger.error(String(error))), this.config.pollIntervalMs);
     void this.pollOnce().catch((error) => this.logger.error(String(error)));
   }
 
   stop(): void {
+    this.running = false;
     if (this.timer) clearInterval(this.timer);
   }
 

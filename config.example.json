@@ -1,15 +1,4 @@
 {
-  "connectorVersion": "0.1.0",
-  "exchangeDirectory": "C:\\Users\\Tim\\Zomboid\\Lua\\KnoxRelay",
-  "pollIntervalMs": 1000,
-  "stableFileAgeMs": 750,
-  "httpTimeoutMs": 5000,
-  "retryInitialMs": 2000,
-  "retryMaxMs": 60000,
-  "syncEndpoint": "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxConnectorPing",
-  "telemetryEndpoint": "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxTelemetryIngest",
-  "missionSyncEndpoint": "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxMissionSync",
-  "missionPollIntervalMs": 5000,
-  "networkId": "",
-  "connectorToken": ""
+  "networkId": "YOUR_NETWORK_ID",
+  "connectorToken": "YOUR_CONNECTOR_TOKEN"
 }
