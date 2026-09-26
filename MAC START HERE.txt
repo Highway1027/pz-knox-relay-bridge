@@ -1,0 +1,47 @@
+MAC START HERE.txt
+v1 - 26-09-2026 - One-time Mac build and normal app launch instructions
+
+FOR RODI
+
+1. Double-click Knox Relay Bridge Source.zip to extract it with macOS Archive Utility.
+2. Open the extracted Knox Relay Bridge folder.
+3. Double-click BUILD KNOX RELAY BRIDGE.command.
+   A Terminal window opens automatically for this one-time build. No commands to type.
+4. If Node.js is missing, the builder opens its official download page.
+   Choose the LTS macOS Installer (.pkg), install it, then double-click the builder again.
+5. Wait for BUILD SUCCEEDED. Finder selects Knox Relay Bridge.app.
+6. Double-click that app. You can move it to Applications.
+
+After this, only open Knox Relay Bridge.app. Node/npm and Terminal are not needed
+for normal app use. Paste your own Network setup JSON into Add Connection.
+
+ARCHITECTURE
+
+The builder detects the Mac hardware, including Apple Silicon under Rosetta:
+- Intel: x64, release/mac/Knox Relay Bridge.app
+- Apple Silicon: arm64, release/mac-arm64/Knox Relay Bridge.app
+This builds one native architecture, not a universal app.
+
+FIRST OPEN / GATEKEEPER
+
+The private app has no Developer ID signing/notarization. If macOS blocks opening,
+try right-click > Open where available. On current macOS, after attempting to open,
+go to System Settings > Privacy & Security > Open Anyway, then confirm Open.
+The same approval may be needed for the downloaded build helper.
+No global Gatekeeper changes or Terminal security commands are needed.
+Apple instructions: https://support.apple.com/en-us/102445
+
+IF THE BUILD FAILS
+
+The builder leaves the error visible and waits for Return. Send Tim the error text.
+Internet access is required to download npm dependencies and Electron.
+Mac build and Finder/Gatekeeper behavior still need verification on Rodi's Mac;
+this package was prepared and its ZIP permissions checked on Windows.
+
+FOR TIM
+
+Send the already-created release/Knox Relay Bridge Source.zip unchanged.
+Do not re-ZIP the source folder with Windows Explorer: that can lose executable
+permissions. The supplied ZIP explicitly stores the .command file as Unix 0755
+with LF line endings. Extract it with macOS Archive Utility.
+The archive excludes local credentials, config.json, .git, node_modules and builds.

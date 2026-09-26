@@ -1,5 +1,5 @@
 <!-- README.md -->
-<!-- v12 - 26-09-2026 - Clarify packaged UX and lifecycle error handling -->
+<!-- v14 - 26-09-2026 - Add ready-to-share Mac source ZIP and one-time native builder -->
 
 # Knox Relay Bridge
 
@@ -7,9 +7,11 @@ Transport-only companion between the local Knox Relay Connector exchange and the
 
 ## Desktop Application
 
-The normal end-user experience is the Electron desktop app: saved connections, pasted webapp setup JSON, in-app start/stop, live Debug logs, Doctor, and per-connection settings. During development:
+The normal end-user experience is the Electron desktop app: saved connections, pasted webapp setup JSON, in-app start/stop, live Debug logs, Doctor, and per-connection settings.
 
 Packaged users double-click `Knox Relay Bridge.exe` on Windows or `Knox Relay Bridge.app` on macOS. Packaged applications bundle Electron/Node and do not require npm, Node, a batch file, or Terminal.
+
+On Windows, open `release/win-unpacked/Knox Relay Bridge.exe`. Keep the entire `win-unpacked` directory together; the EXE uses the bundled resources beside it. Development commands:
 
 ```bash
 npm install
@@ -54,6 +56,12 @@ npm start
 ```
 
 ## macOS
+
+For the one-time Mac build, send **`release/Knox Relay Bridge Source.zip` unchanged**. Rodi extracts it with macOS Archive Utility and double-clicks `BUILD KNOX RELAY BRIDGE.command`. The helper checks Node/npm, opens the official Node installer page if needed, installs dependencies, builds the native Intel or Apple Silicon app, and reveals it in Finder. Node/npm are only required to build; afterward open `Knox Relay Bridge.app` directly. See `MAC START HERE.txt`.
+
+Create this shareable archive on Windows with `node scripts/package-mac-source.mjs`. It explicitly preserves Unix executable mode 0755 and LF line endings for the helper. Do not re-ZIP the folder with Explorer. Local configuration, credentials, dependencies, and build output are excluded.
+
+The actual unsigned Windows cross-build attempt (`electron-builder --mac dir --x64 --arm64`) was rejected by Electron Builder 26.15.3: "Build for macOS is supported only on macOS". No Mac `.app` was produced on Windows. The helper instead builds x64 on Intel or arm64 on Apple Silicon (including under Rosetta), without a DMG. Mac runtime verification remains pending.
 
 The normal exchange folder is detected as `<home>/Zomboid/Lua/KnoxRelay`.
 
@@ -124,6 +132,16 @@ npm run desktop:mac
 
 Electron Builder produces output under ignored `release/`. Windows installers should be built on Windows and macOS DMGs on macOS. Public distribution still requires production icons, application signing, Windows reputation handling, Apple Developer ID signing, hardened runtime, and notarization.
 
+After every meaningful desktop change, rebuild with `npm run desktop:pack` and leave the fresh `release/win-unpacked/Knox Relay Bridge.exe` ready to double-click. On Windows PowerShell with script execution disabled, use `npm.cmd` instead of `npm`.
+
+For a repeatable Windows packaged UI check on a machine with an existing, idle PZ user folder:
+
+```bash
+node scripts/smoke-packaged.mjs --real-pz
+```
+
+This developer-only test launches the packaged EXE three times with an isolated encrypted profile, removes Node/npm from the child PATH, and exercises Add Connection, persistence, navigation, settings, automatic exchange detection, Start/Stop/restart, Debug, Doctor, and close while Running. It uses a local HTTP outage fixture, refuses nonempty live pending/telemetry folders, and verifies existing exchange files are unchanged. Close PZ, Java servers, and other Bridge instances first. Reports are saved under ignored `temp/packaged-smoke-*/`. It never starts PZ and does not prove production authentication or gameplay.
+
 See `docs/DESKTOP.md` for lifecycle, security, pairing, and manual-test details.
 
-The PowerShell helpers under `scripts/` are optional developer conveniences. Production startup uses npm/Node and does not depend on them.
+The PowerShell helpers under `scripts/` are optional developer conveniences. Normal users open the packaged application directly; no helper scripts are needed.

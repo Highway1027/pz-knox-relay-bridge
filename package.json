@@ -24,15 +24,30 @@
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "yazl": "^3.3.1"
   },
   "build": {
     "appId": "com.knoxrelay.bridge",
     "productName": "Knox Relay Bridge",
-    "files": ["dist/**/*", "desktop/**/*", "package.json"],
-    "directories": { "output": "release" },
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg", "category": "public.app-category.utilities" },
-    "linux": { "target": "AppImage", "category": "Utility" }
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Utility"
+    }
   }
 }
