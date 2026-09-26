@@ -1,12 +1,12 @@
 // tests/KnoxApiClient.test.ts
-// v3 - 25-09-2026 - Verify strict Phase 6B area mission validation
+// v5 - 26-09-2026 - Verify hardened dynamic recon and decline validation
 
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import test from "node:test";
 import { DEFAULT_CONFIG } from "../src/config/KnoxBridgeConfig.js";
 import { KnoxApiClient } from "../src/http/KnoxApiClient.js";
-import { validateTestMission } from "../src/protocol/KnoxValidators.js";
+import { validateMissionDeclined, validateTestMission } from "../src/protocol/KnoxValidators.js";
 
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -99,4 +99,36 @@ test('validates a bounded dynamic delivery-area fixture', () => {
     reward: { type: 'xp', rewardId: 'test_reward_xp_003', perk: 'Woodwork', amount: 50 }, testFixture: { provisionRequirementsOnAccept: true, kind: 'nearby' } };
   assert.equal(validateTestMission(mission).missionId, 'test_006');
   assert.throws(() => validateTestMission({ ...mission, objective: { ...mission.objective, deliveryArea: { ...mission.objective.deliveryArea, radius: 999 } } }), /invalid test mission/);
+});
+
+test('validates a dynamic verified-location recon without changing mechanics', () => {
+  const mission = { protocolVersion: 1, missionId: 'mission_v02_recon_fallas_lake_residential_spawn', missionVersion: 1,
+    title: 'Recon: Fallas Lake', status: 'available',
+    objective: { type: 'visit_area', text: 'Reach the verified area and report in.', area: { type: 'radius', x: 7213, y: 8288, z: 0, radius: 60, name: 'Fallas Lake residential spawn area' } },
+    reward: { type: 'xp', rewardId: 'reward_mission_v02_recon_fallas_lake_residential_spawn', perk: 'Woodwork', amount: 75 }, testFixture: null,
+    location: { locationId: 'fallas_lake_residential_spawn', name: 'Fallas Lake residential spawn area', town: 'Fallas Lake', navigation: { nearestNamedPlace: 'Fallas Lake' } },
+    navigationContext: { distanceTiles: 1400, direction: 'NW', reference: 'party' },
+    chain: { chainId: 'knox_relay_v02', stage: 1, requiresCompleted: [] },
+    narrative: { briefing: 'Conditions unknown.', shortObjective: 'Reach the area.', arrivalMessage: 'Signal acquired.', completionMessage: 'Confirmed.' } };
+  assert.equal(validateTestMission(mission).missionId, mission.missionId);
+  assert.throws(() => validateTestMission({ ...mission, objective: { ...mission.objective, area: { ...mission.objective.area, x: 'AI says here' } } }), /invalid curated visit mission/);
+  assert.throws(() => validateTestMission({ ...mission, reward: { ...mission.reward, amount: 999 } }), /invalid curated visit mission/);
+});
+
+test('keeps legacy curated visit payloads compatible without navigation context', () => {
+  const mission = { protocolVersion: 1, missionId: 'mission_v0_muldraugh_checkin', missionVersion: 1,
+    title: 'Local Signal Check', status: 'available',
+    objective: { type: 'visit_area', text: 'Reach the verified Muldraugh area and establish contact.', area: { type: 'radius', x: 10997, y: 9699, z: 0, radius: 60, name: 'Muldraugh residential spawn area' } },
+    reward: { type: 'xp', rewardId: 'reward_mission_v0_muldraugh_checkin', perk: 'Woodwork', amount: 75 }, testFixture: null,
+    location: { locationId: 'muldraugh_residential_spawn', name: 'Muldraugh residential spawn area', town: 'Muldraugh' },
+    chain: { chainId: 'knox_relay_v0', stage: 1, requiresCompleted: [] },
+    narrative: { briefing: 'Conditions unknown.', shortObjective: 'Reach the area.', arrivalMessage: 'Signal acquired.', completionMessage: 'Confirmed.' } };
+  assert.equal(validateTestMission(mission).missionId, mission.missionId);
+});
+
+test('validates the durable shared decline event', () => {
+  const event = { protocolVersion: 1, messageId: 'evt_decline_001', type: 'mission_declined', createdAt: new Date().toISOString(),
+    payload: { missionId: 'mission_v02_recon_fallas_lake_residential_spawn', missionVersion: 1, declinedBy: 'steam:123' } };
+  assert.equal(validateMissionDeclined(event).payload.missionId, event.payload.missionId);
+  assert.throws(() => validateMissionDeclined({ ...event, payload: { ...event.payload, declinedBy: '' } }), /invalid mission decline/);
 });

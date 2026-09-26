@@ -1,7 +1,7 @@
 // src/protocol/KnoxValidators.ts
-// v4 - 25-09-2026 - Strictly validate verified-location visit missions
+// v6 - 26-09-2026 - Harden dynamic verified-location mission mechanics
 
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -77,7 +77,7 @@ const MISSIONS = {
 } as const;
 
 function isMissionId(value: unknown): value is MissionId {
-  return typeof value === "string" && (Object.prototype.hasOwnProperty.call(MISSIONS, value) || /^mission_v0_(muldraugh_checkin|fallas_recon|echo_recon|march_recon|westpoint_recon)$/.test(value));
+  return typeof value === "string" && (Object.prototype.hasOwnProperty.call(MISSIONS, value) || /^mission_v0[2]?_[a-z0-9_]{1,96}$/.test(value));
 }
 
 function exactJson(left: unknown, right: unknown): boolean {
@@ -101,10 +101,10 @@ function validAreaObjective(value: unknown, expected: (typeof MISSIONS)["test_00
 export function validateTestMission(value: unknown): ConnectorMission {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("mission must be an object");
   const mission = value as Record<string, unknown>;
-  const curated = typeof mission.missionId === 'string' && mission.missionId.startsWith('mission_v0_');
-  if (!exactKeys(mission, curated
-    ? ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture", "location", "chain", "narrative"]
-    : ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture"])) throw new Error("unexpected mission fields");
+  const curated = typeof mission.missionId === 'string' && (mission.missionId.startsWith('mission_v0_') || mission.missionId.startsWith('mission_v02_'));
+  const curatedKeys = ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture", "location", "chain", "narrative"];
+  if (!(curated ? exactKeys(mission, curatedKeys) || exactKeys(mission, [...curatedKeys, "navigationContext"])
+    : exactKeys(mission, ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture"]))) throw new Error("unexpected mission fields");
   if (!isMissionId(mission.missionId)) throw new Error("invalid test mission ID");
   if (curated) {
     const objective = mission.objective as Record<string, unknown>;
@@ -112,11 +112,22 @@ export function validateTestMission(value: unknown): ConnectorMission {
     const location = mission.location as Record<string, unknown>;
     const chain = mission.chain as Record<string, unknown>;
     const narrative = mission.narrative as Record<string, unknown>;
+    const navigation = mission.navigationContext as Record<string, unknown> | null;
+    const reward = mission.reward as Record<string, unknown>;
+    const dynamic = typeof mission.missionId === 'string' && mission.missionId.startsWith('mission_v02_recon_');
+    const dynamicLocationId = dynamic ? mission.missionId.slice('mission_v02_recon_'.length) : null;
     if (mission.protocolVersion !== 1 || mission.missionVersion !== 1 || mission.status !== 'available' || mission.testFixture !== null ||
         !objective || objective.type !== 'visit_area' || typeof objective.text !== 'string' || !area || area.type !== 'radius' ||
-        ![area.x, area.y, area.z, area.radius].every((entry) => typeof entry === 'number' && Number.isFinite(entry)) ||
-        typeof area.name !== 'string' || !location || typeof location.locationId !== 'string' || typeof location.town !== 'string' ||
+        ![area.x, area.y, area.z, area.radius].every((entry) => typeof entry === 'number' && Number.isInteger(entry)) ||
+        Number(area.x) < 0 || Number(area.x) > 1000000 || Number(area.y) < 0 || Number(area.y) > 1000000 ||
+        Number(area.z) < 0 || Number(area.z) > 32 || Number(area.radius) < 1 || Number(area.radius) > 500 ||
+        typeof area.name !== 'string' || area.name.length < 1 || area.name.length > 128 || !location ||
+        typeof location.locationId !== 'string' || typeof location.town !== 'string' || typeof location.name !== 'string' ||
+        (dynamic && (location.locationId !== dynamicLocationId || !reward || reward.type !== 'xp' ||
+          reward.rewardId !== `reward_${mission.missionId}` || reward.perk !== 'Woodwork' || reward.amount !== 75)) ||
         !chain || typeof chain.chainId !== 'string' || !Number.isInteger(chain.stage) || !Array.isArray(chain.requiresCompleted) ||
+        (navigation != null && (typeof navigation.distanceTiles !== 'number' || !Number.isInteger(navigation.distanceTiles) || navigation.distanceTiles < 0 ||
+          !['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'here'].includes(String(navigation.direction)) || typeof navigation.reference !== 'string')) ||
         !narrative || !['briefing', 'shortObjective', 'arrivalMessage', 'completionMessage'].every((key) => typeof narrative[key] === 'string'))
       throw new Error('invalid curated visit mission');
     return mission as unknown as ConnectorMission;
@@ -170,4 +181,17 @@ export function validateMissionCompleted(value: unknown): MissionCompletedMessag
       payload.missionVersion !== 1 || payload.objectiveType !== 'visit_area' || typeof payload.completedBy !== 'string')
     throw new Error('invalid mission completion');
   return message as unknown as MissionCompletedMessage;
+}
+
+export function validateMissionDeclined(value: unknown): MissionDeclinedMessage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('message root must be an object');
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  if (!exactKeys(message, ['protocolVersion', 'messageId', 'type', 'createdAt', 'payload']) || message.protocolVersion !== 1 ||
+      message.type !== 'mission_declined' || typeof message.messageId !== 'string' || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== 'string' || Number.isNaN(Date.parse(message.createdAt)) || !payload || Array.isArray(payload) ||
+      !exactKeys(payload, ['missionId', 'missionVersion', 'declinedBy']) || !isMissionId(payload.missionId) ||
+      payload.missionVersion !== 1 || typeof payload.declinedBy !== 'string' || payload.declinedBy.length < 1)
+    throw new Error('invalid mission decline');
+  return message as unknown as MissionDeclinedMessage;
 }

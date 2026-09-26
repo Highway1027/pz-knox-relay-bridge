@@ -1,5 +1,5 @@
 <!-- README.md -->
-<!-- v8 - 25-09-2026 - Document strict Phase 6B area mission transport -->
+<!-- v9 - 26-09-2026 - Document Mission Pack v0.2 and decline transport -->
 
 # Knox Relay Bridge
 
@@ -46,3 +46,7 @@ Phase 4 passed in real B42.20.4: delivery, PZ acknowledgement, restart deduplica
 ## Phase 6B area fixtures
 
 Mission transport accepts the fixed `test_006` and `test_007` schemas, including a strict radius-20 `deliveryArea` snapshot. The Bridge validates bounded integer coordinates and writes the validated mission unchanged through the existing atomic local queue. It does not choose locations, teleport players, or infer map safety. The `test_007` `X + 200` target is deterministic development data only and may contain unusable terrain.
+
+## Mission Pack v0.2
+
+The Bridge accepts strict `mission_v02_*` verified-location recon payloads while remaining transport-only. It validates bounded mechanics/navigation metadata, writes the unchanged payload atomically, and durably relays completion and shared decline events. It does not rank destinations or supply geography.
