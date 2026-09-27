@@ -1,5 +1,5 @@
 // tests/KnoxDesktopBuild.test.ts
-// v1 - 26-09-2026 - Guard CommonJS preload format, API contract, and renderer fallback
+// v2 - 27-09-2026 - Preload path comes from the launcher-selected code root
 
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
@@ -20,7 +20,9 @@ test("desktop preload is CommonJS, exists, and exposes the renderer API contract
 
 test("BrowserWindow points at packaged CommonJS preload with isolation and sandbox enabled", async () => {
   const main = await readFile(path.resolve("src", "desktop", "main.ts"), "utf8");
-  assert.match(main, /app\.getAppPath\(\), "desktop", "preload\.cjs"/);
+  // The preload comes from the launcher-selected code root (built-in or installed update).
+  assert.match(main, /path\.join\(codeRoot, "desktop", "preload\.cjs"\)/);
+  assert.match(main, /const codeRoot = launcher\?\.codeRoot \?\? app\.getAppPath\(\)/);
   assert.match(main, /contextIsolation: true/);
   assert.match(main, /sandbox: true/);
   assert.match(main, /nodeIntegration: false/);

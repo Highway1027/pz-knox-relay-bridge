@@ -1,5 +1,5 @@
 // desktop/renderer/renderer.js
-// v3 - 26-09-2026 - Surface lifecycle transitions and actionable startup failures
+// v4 - 27-09-2026 - Settings: running version, install update, restart, revert
 
 if (!window.knox) {
   document.body.innerHTML = `<main class="fatal"><h1>Knox Relay Bridge failed to initialize.</h1><p>The desktop bridge API could not be loaded.</p><p>Open Developer Tools for diagnostics.</p></main>`;
@@ -87,5 +87,28 @@ if (!window.knox) {
   $("clear").onclick = () => { state.logs.set($("debug-connection").value, []); renderLogs(); };
   $("copy").onclick = () => navigator.clipboard.writeText($("logs").textContent);
   $("legacy").onclick = async () => { const found = await api.legacy(); if (!found) { $("legacy-result").textContent = "No legacy config.json found."; return; } if (confirm("Existing Knox Relay Bridge configuration found. Import as a saved connection?")) { await api.importLegacy("Imported Legacy Connection"); $("legacy-result").textContent = "Legacy config imported. The original was not changed."; await refresh(); } };
+  async function renderVersion() {
+    const info = await api.appInfo();
+    const source = info.source === "update" ? `installed update (built-in ${info.builtInVersion})` : "built-in";
+    $("app-version").textContent = `Version ${info.version}, ${source}.` + (info.notes.length ? ` ${info.notes.join(" ")}` : "");
+    $("install-update").disabled = !info.updatesSupported;
+    $("revert-update").hidden = info.source !== "update";
+    if (!info.updatesSupported) $("update-result").textContent = "This build cannot install updates. Rebuild the Bridge once to enable them.";
+  }
+  $("install-update").onclick = async () => {
+    $("update-result").textContent = "Checking the update…";
+    const result = await api.installUpdate();
+    if (result.cancelled) { $("update-result").textContent = ""; return; }
+    if (!result.ok) { $("update-result").textContent = `Update not installed: ${result.reason}`; return; }
+    $("update-result").textContent = `Update ${result.version} is installed. Restart the Bridge to use it; running connections stop and can be started again.`;
+    $("restart-app").hidden = false;
+  };
+  $("restart-app").onclick = () => api.restart();
+  $("revert-update").onclick = async () => {
+    await api.revertUpdate();
+    $("update-result").textContent = "The built-in version runs after a restart.";
+    $("restart-app").hidden = false;
+  };
+  renderVersion();
   refresh();
 }

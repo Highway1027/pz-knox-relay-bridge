@@ -1,7 +1,7 @@
 // src/desktop/main.ts
-// v3 - 26-09-2026 - Stop runtimes before teardown and guard renderer log delivery
+// v4 - 27-09-2026 - Load UI from the launcher-selected code root; Settings update install and restart
 
-import { app, BrowserWindow, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFile } from "node:fs/promises";
@@ -10,6 +10,12 @@ import { parseConnectionImport } from "./ConnectionTypes.js";
 import { BridgeRuntimeManager } from "./BridgeRuntimeManager.js";
 import { DEFAULT_CONFIG } from "../config/KnoxBridgeConfig.js";
 
+// Set by desktop/launcher.cjs. Absent when main.js is started directly (npm run desktop without the launcher).
+type Launcher = { apiVersion: number; codeRoot: string; version: string; source: "built-in" | "update"; builtInVersion: string; notes: string[];
+  markHealthy(): void; installUpdate(file: string): { ok: boolean; version?: string; reason?: string }; revertToBuiltIn(): void };
+const launcher = (globalThis as { knoxLauncher?: Launcher }).knoxLauncher;
+// The UI (preload + renderer) comes from the same code root as this file, so updates can change it too.
+const codeRoot = launcher?.codeRoot ?? app.getAppPath();
 let window: BrowserWindow | undefined; let store: ConnectionStore; let runtime: BridgeRuntimeManager; let shuttingDown = false; let smokeInProgress = false;
 const legacyPath = path.resolve("config.json");
 if (process.env.KNOX_SMOKE_USER_DATA) app.setPath("userData", process.env.KNOX_SMOKE_USER_DATA);
@@ -29,13 +35,25 @@ function registerIpc(): void {
   ipcMain.handle("runtime:stop", (_event, id: string) => runtime.stop(id)); ipcMain.handle("runtime:status", async (_event, id: string) => runtime.describe(await connection(id)));
   ipcMain.handle("runtime:doctor", async (_event, id: string) => runtime.doctor(await connection(id)));
   ipcMain.handle("legacy:read", async () => Boolean(await legacy()));
+  ipcMain.handle("app:info", () => ({ version: launcher?.version ?? app.getVersion(), source: launcher?.source ?? "built-in",
+    builtInVersion: launcher?.builtInVersion ?? app.getVersion(), updatesSupported: Boolean(launcher), notes: launcher?.notes ?? [] }));
+  ipcMain.handle("update:install", async () => {
+    if (!launcher) return { ok: false, reason: "This build has no update launcher; rebuild the Bridge once." };
+    const picked = window ? await dialog.showOpenDialog(window, { title: "Install Knox Relay Bridge update", properties: ["openFile"], filters: [{ name: "Bridge update", extensions: ["zip"] }] }) : undefined;
+    if (!picked || picked.canceled || picked.filePaths.length === 0) return { ok: false, cancelled: true };
+    return launcher.installUpdate(picked.filePaths[0] as string);
+  });
+  ipcMain.handle("update:revert", () => { launcher?.revertToBuiltIn(); return { ok: true }; });
+  ipcMain.handle("app:restart", () => { shuttingDown = true; runtime?.stopAll(); app.relaunch(); app.quit(); });
   ipcMain.handle("legacy:import", async (_event, name: string) => { const raw = await legacy(); if (!raw) throw new Error("Legacy config.json was not found"); return store.add(parseConnectionImport({ telemetryEndpoint: DEFAULT_CONFIG.telemetryEndpoint, missionSyncEndpoint: DEFAULT_CONFIG.missionSyncEndpoint, ...raw }), name); });
 }
 async function createWindow(): Promise<void> {
-  window = new BrowserWindow({ width: 980, height: 720, minWidth: 760, minHeight: 560, backgroundColor: "#101418", webPreferences: { preload: path.join(app.getAppPath(), "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  window = new BrowserWindow({ width: 980, height: 720, minWidth: 760, minHeight: 560, backgroundColor: "#101418", webPreferences: { preload: path.join(codeRoot, "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   window.on("close", () => { shuttingDown = true; runtime?.stopAll(); });
   window.on("closed", () => { window = undefined; });
-  await window.loadFile(path.join(app.getAppPath(), "desktop", "renderer", "index.html"));
+  await window.loadFile(path.join(codeRoot, "desktop", "renderer", "index.html"));
+  // The window loaded from this code: tell the launcher this version starts correctly.
+  launcher?.markHealthy();
   const smokeArgument = process.argv.find((item) => item.startsWith("--smoke-test="));
   const smokeReport = process.env.KNOX_SMOKE_REPORT ?? smokeArgument?.slice("--smoke-test=".length);
   if (smokeReport) await runSmokeTest(window, smokeReport);

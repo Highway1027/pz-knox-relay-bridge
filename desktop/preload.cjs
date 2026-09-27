@@ -1,5 +1,5 @@
 // desktop/preload.cjs
-// v1 - 26-09-2026 - Expose sandbox-compatible CommonJS desktop IPC bridge
+// v2 - 27-09-2026 - Add app version, update install and restart
 
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld("knox", {
   doctor: (id) => ipcRenderer.invoke("runtime:doctor", id),
   legacy: () => ipcRenderer.invoke("legacy:read"),
   importLegacy: (name) => ipcRenderer.invoke("legacy:import", name),
+  appInfo: () => ipcRenderer.invoke("app:info"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  revertUpdate: () => ipcRenderer.invoke("update:revert"),
+  restart: () => ipcRenderer.invoke("app:restart"),
   onLog: (listener) => {
     const handler = (_event, id, item) => listener(id, item);
     ipcRenderer.on("runtime:log", handler);

@@ -1,5 +1,5 @@
 <!-- docs/DESKTOP.md -->
-<!-- v5 - 26-09-2026 - Add native Mac builder and permission-preserving source distribution -->
+<!-- v6 - 27-09-2026 - Drop-in signed code updates (launcher 1, app 0.2.0) -->
 
 # Desktop Bridge
 
@@ -45,6 +45,28 @@ Windows users double-click `release/win-unpacked/Knox Relay Bridge.exe` and keep
 `node scripts/smoke-packaged.mjs --real-pz` checks the Windows package against the existing idle user's PZ folder using a separate profile and a local HTTP 503 fixture. It does not start PZ, use saved user credentials, or contact production. It refuses active PZ/Bridge processes and nonempty pending/telemetry queues. See `../walkthrough.md` for the Ally results. The older built-in `--smoke-test` checks a missing-PZ fixture and assumes a missing user root; use the new runner for a real PZ installation.
 
 Before public distribution: add production icons and metadata, configure code-signing identities, notarize macOS output, test clean-machine installation/update/uninstall, publish privacy/support information, and establish a signed update/release process.
+
+## Drop-in updates (since 0.2.0)
+
+Install the app once; later versions arrive as a signed ZIP installed from **Settings → Install update…**. No rebuild, no Gatekeeper or Keychain prompts, connections kept.
+
+How it works:
+
+- `desktop/launcher.cjs` is the app entry point (`package.json` `main`). With `desktop/updater-core.cjs` and `desktop/update-public-key.pem` it is built into the app and never replaced by an update.
+- Installed updates live in `<userData>/app-code/<version>/`; `current.json` names the active one. At every start the launcher verifies the Ed25519 signature of `manifest.json` and the SHA-256 of every file, and only runs a version newer than the built-in one.
+- The window, preload and renderer load from the selected code root, so updates can change the UI too.
+- Crash guard: every start records an attempt; `main.js` reports healthy once the window has loaded. A version that did not report healthy, fails to load, or fails verification is skipped and the built-in code runs. Settings can also go back to the built-in version.
+- An update declares `minLauncher`. Raise `LAUNCHER_API_VERSION` in `updater-core.cjs` only when the launcher contract changes; that is the one case where every user rebuilds.
+
+Publishing an update (Tim):
+
+1. Raise `version` in `package.json` (e.g. 0.2.0 → 0.2.1).
+2. `npm run update:package` builds and signs `release/Knox Relay Bridge Update <version>.zip`, after checking the signing key matches the public key in the app.
+3. Send that ZIP unchanged. Users pick it in Settings → Install update… and press Restart now.
+
+Signing key: created once with `npm run update:keygen` at `%USERPROFILE%\.knox-relay\bridge-update-private.pem` (override with `KNOX_UPDATE_PRIVATE_KEY`). It never goes into a repository or ZIP. **Back it up**: without it no further updates can be signed, and every user would have to rebuild once with a new public key.
+
+Verified 27-09-2026 in the packaged Windows app with isolated profiles: built-in start; signed update 0.2.1 loaded and reported healthy; a tampered update rejected with the built-in version running. `tests/KnoxUpdater.test.ts` covers signatures, tampering, ZIP safety, versions and the crash guard.
 
 ## Manual test checklist
 

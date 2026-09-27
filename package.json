@@ -1,11 +1,11 @@
 {
   "name": "knox-relay-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "author": "Knox Relay",
   "description": "Transport-only local bridge between Project Zomboid and Knox Relay",
   "type": "module",
-  "main": "dist/src/desktop/main.js",
+  "main": "desktop/launcher.cjs",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prestart": "npm run build",
@@ -17,7 +17,9 @@
     "desktop:mac": "npm run build && electron-builder --mac",
     "dev": "tsx src/index.ts",
     "doctor": "npm run build --silent && node dist/src/doctor.js",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "update:keygen": "node scripts/update-keygen.mjs",
+    "update:package": "npm run build && node scripts/package-update.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
