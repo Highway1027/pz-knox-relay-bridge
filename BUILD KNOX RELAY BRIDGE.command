@@ -50,7 +50,7 @@ fi
 
 printf 'Building for this Mac: %s\n' "$architecture"
 printf 'Downloading build dependencies; this can take a few minutes.\n'
-npm install --no-audit --no-fund
+npm ci --no-audit --no-fund
 
 # No Developer ID identity or DMG is needed for this private local build.
 export CSC_IDENTITY_AUTO_DISCOVERY=false

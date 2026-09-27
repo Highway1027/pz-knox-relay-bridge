@@ -1,9 +1,16 @@
 # .github/workflows/release.yml
-# v1 - 27-09-2026 - Publish a signed Bridge update when main receives a new version
+# v2 - 27-09-2026 - Security: pinned actions, no install scripts, tests isolated from the signing key
 
 # develop = work in progress (nothing is published). A push to main runs the tests and, only if
 # package.json has a version without a release yet, builds, signs and publishes a GitHub Release
 # with the update ZIP and latest.json. Running Bridges pick it up through their auto-updater.
+#
+# Security:
+# - Actions are pinned to exact commits (a moved tag cannot change what runs here).
+# - npm ci --ignore-scripts: no dependency runs its own install code.
+# - The tests (which execute a lot of third-party code) run in a job WITHOUT the signing key.
+#   The release job only compiles, packages and signs; the key exists only in its signing step.
+# - The key is a secret of the "release" environment, which only the main branch may use.
 
 name: Release Bridge update
 
@@ -13,33 +20,44 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-bridge
   cancel-in-progress: false
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
-    # The signing key is a secret of this environment; restrict the environment to the main branch.
-    environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-        env:
-          # Tests and packaging need no Electron binary.
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - name: Install dependencies (no install scripts)
+        run: npm ci --ignore-scripts
 
       - name: Test
         run: npm test
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
 
       - name: Read version
         id: version
@@ -50,14 +68,22 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "v${{ steps.version.outputs.value }}" > /dev/null 2>&1; then
+          if gh release view "v${{ steps.version.outputs.value }}" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             echo "Version ${{ steps.version.outputs.value }} is already released; nothing to publish."
             echo "released=true" >> "$GITHUB_OUTPUT"
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and sign the update
+      - name: Install dependencies (no install scripts)
+        if: steps.existing.outputs.released == 'false'
+        run: npm ci --ignore-scripts
+
+      - name: Compile
+        if: steps.existing.outputs.released == 'false'
+        run: npm run build
+
+      - name: Package and sign the update
         if: steps.existing.outputs.released == 'false'
         env:
           KNOX_UPDATE_PRIVATE_KEY_PEM: ${{ secrets.KNOX_UPDATE_PRIVATE_KEY_PEM }}
@@ -72,6 +98,7 @@ jobs:
           gh release create "v$VERSION" \
             "release/knox-relay-bridge-update-$VERSION.zip" \
             "release/latest.json" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Knox Relay Bridge $VERSION" \
             --notes "Signed drop-in update. Bridges with automatic updates install it by themselves; otherwise use Settings → Install update file… with the ZIP below." \
             --target "$GITHUB_SHA" \

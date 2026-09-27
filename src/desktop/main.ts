@@ -1,12 +1,13 @@
 // src/desktop/main.ts
-// v6 - 27-09-2026 - First update check 3 s after start so the result shows on opening
+// v7 - 27-09-2026 - Security: unknown-backend confirmation, ZIP guard for manual installs, navigation guards
 
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFile } from "node:fs/promises";
 import { ConnectionStore, type SecretVault } from "./ConnectionStore.js";
-import { parseConnectionImport } from "./ConnectionTypes.js";
+import { parseConnectionImport, unknownEndpointHosts } from "./ConnectionTypes.js";
+import { checkZipFile } from "./ZipGuard.js";
 import { BridgeRuntimeManager } from "./BridgeRuntimeManager.js";
 import { DEFAULT_CONFIG } from "../config/KnoxBridgeConfig.js";
 import { AutoUpdater, type CheckResult } from "./AutoUpdater.js";
@@ -60,7 +61,15 @@ async function legacy(): Promise<Record<string, unknown> | undefined> { try { re
 
 function registerIpc(): void {
   ipcMain.handle("connections:list", () => store.list());
-  ipcMain.handle("connections:add", async (_event, json: string, name: string) => store.add(parseConnectionImport(json), name));
+  ipcMain.handle("connections:add", async (_event, json: string, name: string, allowUnknownHosts?: boolean) => {
+    const imported = parseConnectionImport(json);
+    const unknown = unknownEndpointHosts(imported);
+    // Setup text normally comes from the Knox Relay webapp; any other server would receive the token.
+    if (unknown.length > 0 && allowUnknownHosts !== true) {
+      throw new Error(`UNKNOWN_HOST: This setup text sends your connector token to ${unknown.join(", ")}, not to the Knox Relay backend. Only continue if you trust whoever gave it to you.`);
+    }
+    return store.add(imported, name);
+  });
   ipcMain.handle("connections:update", (_event, id: string, changes, token?: string) => store.update(id, changes, token));
   ipcMain.handle("connections:remove", async (_event, id: string) => { runtime.stop(id); await store.remove(id); });
   ipcMain.handle("runtime:start", async (_event, id: string) => runtime.start(await connection(id)));
@@ -73,7 +82,10 @@ function registerIpc(): void {
     if (!launcher) return { ok: false, reason: "This build has no update launcher; rebuild the Bridge once." };
     const picked = window ? await dialog.showOpenDialog(window, { title: "Install Knox Relay Bridge update", properties: ["openFile"], filters: [{ name: "Bridge update", extensions: ["zip"] }] }) : undefined;
     if (!picked || picked.canceled || picked.filePaths.length === 0) return { ok: false, cancelled: true };
-    return launcher.installUpdate(picked.filePaths[0] as string);
+    const file = picked.filePaths[0] as string;
+    // Bounded check before the launcher unpacks it (older launchers have no size limits).
+    try { await checkZipFile(file); } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) }; }
+    return launcher.installUpdate(file);
   });
   ipcMain.handle("update:auto:get", async () => (await readSettings()).autoUpdate);
   ipcMain.handle("update:auto:set", async (_event, enabled: boolean) => { await writeFile(settingsPath(), `${JSON.stringify({ autoUpdate: enabled === true }, null, 2)}\n`, "utf8"); return enabled === true; });
@@ -85,6 +97,10 @@ function registerIpc(): void {
 }
 async function createWindow(): Promise<void> {
   window = new BrowserWindow({ width: 980, height: 720, minWidth: 760, minHeight: 560, backgroundColor: "#101418", webPreferences: { preload: path.join(codeRoot, "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  // The window only ever shows the Bridge's own pages: no new windows, no navigating away.
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event) => { event.preventDefault(); });
+  window.webContents.on("will-attach-webview", (event) => { event.preventDefault(); });
   window.on("close", () => { shuttingDown = true; runtime?.stopAll(); });
   window.on("closed", () => { window = undefined; });
   await window.loadFile(path.join(codeRoot, "desktop", "renderer", "index.html"));
@@ -108,7 +124,7 @@ async function runSmokeTest(target: BrowserWindow, reportPath: string): Promise<
       if (!document.getElementById("add-dialog").open) throw new Error("Add Connection did not open");
       document.getElementById("setup-json").value = JSON.stringify({ telemetryEndpoint:"https://example.test/telemetry", missionSyncEndpoint:"https://example.test/missions", networkId:"smoke-network", connectorToken:"smoke-token" });
       document.getElementById("connection-name").value = "Smoke Test";
-      document.getElementById("save-connection").click();
+      document.getElementById("save-connection").click(); await wait(300); if (document.getElementById("save-connection").textContent === "Save anyway") document.getElementById("save-connection").click();
       await until(() => document.querySelector("[data-open]"));
       document.querySelector('[data-view="debug"]').click(); if (!document.getElementById("debug").classList.contains("active")) throw new Error("Debug navigation failed");
       document.querySelector('[data-view="settings"]').click(); if (!document.getElementById("settings").classList.contains("active")) throw new Error("Settings navigation failed");
@@ -128,7 +144,7 @@ async function runSmokeTest(target: BrowserWindow, reportPath: string): Promise<
       document.getElementById("add-button").click();
       const connectionCountBeforeActive = document.querySelectorAll("[data-start]").length;
       document.getElementById("setup-json").value = JSON.stringify({ telemetryEndpoint:"https://example.test/telemetry", missionSyncEndpoint:"https://example.test/missions", networkId:"running-network", connectorToken:"running-token", exchangeRoot:${JSON.stringify(exchangeRoot)} });
-      document.getElementById("connection-name").value = "Active Close Test"; document.getElementById("save-connection").click();
+      document.getElementById("connection-name").value = "Active Close Test"; document.getElementById("save-connection").click(); await wait(300); if (document.getElementById("save-connection").textContent === "Save anyway") document.getElementById("save-connection").click();
       await until(() => document.querySelectorAll("[data-start]").length > connectionCountBeforeActive);
       const startButtons = document.querySelectorAll("[data-start]"); startButtons[startButtons.length - 1].click();
       await until(() => [...document.querySelectorAll(".card")].some((card) => card.textContent.includes("Active Close Test") && card.querySelector(".status")?.textContent.includes("Running")));

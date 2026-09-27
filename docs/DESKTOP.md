@@ -1,5 +1,5 @@
 <!-- docs/DESKTOP.md -->
-<!-- v7 - 27-09-2026 - Automatic updates from GitHub Releases; release on push to main -->
+<!-- v8 - 27-09-2026 - Security review 27-09-2026: model, fixes, remaining items -->
 
 # Desktop Bridge
 
@@ -72,6 +72,27 @@ One-time GitHub setup: repository Settings → Environments → new environment 
 Signing key: created once with `npm run update:keygen` at `%USERPROFILE%\.knox-relay\bridge-update-private.pem` (override with `KNOX_UPDATE_PRIVATE_KEY`). It never goes into a repository or ZIP. **Back it up**: without it no further updates can be signed, and every user would have to rebuild once with a new public key.
 
 Verified 27-09-2026 in the packaged Windows app with isolated profiles: built-in start; signed update 0.2.1 loaded and reported healthy; a tampered update rejected with the built-in version running; and automatic update: a 0.2.0 app fetched `latest.json` and the ZIP from a local release feed, installed 0.2.1 by itself and ran it healthy after a restart. `tests/KnoxUpdater.test.ts` and `tests/KnoxAutoUpdater.test.ts` cover signatures, tampering, ZIP safety, versions, the crash guard, checksums, wrong keys and offline behaviour.
+
+## Security (review 27-09-2026)
+
+Trust model: a Bridge user trusts the Knox Relay backend (missions) and the update channel (code). The Bridge opens no network port, so nobody can connect to a PC running it. Harm requires bad intent from the publisher, or a compromise of the GitHub account, the release pipeline or the PC holding the signing key.
+
+In place: OS-encrypted tokens (safeStorage), redacted logs; sandboxed renderer with context isolation, no Node, a self-only Content Security Policy, escaped output, no new windows or navigation; strictly validated mission and message ids before they become file names; signed updates verified file by file at every start, newer-only, crash-guarded.
+
+Fixed in 0.2.3:
+
+- Connector tokens only over HTTPS (plain HTTP only to localhost), at import and again before a connection starts.
+- Setup text whose endpoints are not the Knox Relay backend (`europe-west1-wildshape-tracker.cloudfunctions.net`) needs a second, deliberate "Save anyway".
+- Update ZIPs pass a bounded check (30 MB file, 500 entries, 60 MB unpacked) before the launcher unpacks them, for automatic and manual installs; downloads stop when larger than announced. The launcher source has the same limits for future builds.
+- The window denies new windows, navigation and webviews.
+- Release pipeline: actions pinned to commits, `npm ci --ignore-scripts`, tests in a job without the signing key, the key only in the signing step of the `release` environment.
+- Mac build uses `npm ci` (exact lock file).
+
+Remaining, deliberately later:
+
+- Electron fuses (disable RunAsNode, NODE_OPTIONS and inspect flags) need an app rebuild; do them with the next launcher change.
+- The private signing key is an unencrypted file on Tim's PC: keep an offline backup; if the PC is compromised, create a new key (every user rebuilds once).
+- Optional: GitHub "Required reviewers" on the `release` environment, so every release needs one approval click.
 
 ## Manual test checklist
 

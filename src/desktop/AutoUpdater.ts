@@ -1,5 +1,5 @@
 // src/desktop/AutoUpdater.ts
-// v1 - 27-09-2026 - Check the published release feed, download the signed update, hand it to the launcher
+// v2 - 27-09-2026 - Bounded download and ZIP guard before the launcher unpacks the update
 
 // Updatable code: it only downloads. Verification and installation stay in the launcher
 // (desktop/updater-core.cjs), which rejects anything not signed with the publisher key.
@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { checkZipBuffer } from "./ZipGuard.js";
 
 // GitHub's stable "latest release" address; releases are published by .github/workflows/release.yml.
 export const DEFAULT_FEED_URL = "https://github.com/Highway1027/pz-knox-relay-bridge/releases/latest/download/latest.json";
@@ -72,6 +73,22 @@ export class AutoUpdater {
     } finally { clearTimeout(timer); }
   }
 
+  // Reads a response body, stopping as soon as it exceeds the size latest.json announced.
+  private async readBounded(response: Response, expected: number): Promise<Buffer> {
+    if (!response.body) throw new Error("download has no body");
+    const reader = response.body.getReader();
+    const chunks: Buffer[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > expected) { await reader.cancel(); throw new Error(`download is larger than the announced ${expected} bytes`); }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks);
+  }
+
   // One check: newer release? download, verify its checksum, hand it to the launcher to install.
   async check(): Promise<CheckResult> {
     if (this.running) return { status: "error", reason: "a check is already running" };
@@ -81,9 +98,10 @@ export class AutoUpdater {
       const current = this.installedThisSession ?? this.options.currentVersion();
       if (compareVersions(latest.version, current) <= 0) return { status: "up-to-date", version: current };
       const response = await this.get(new URL(latest.file, this.feedUrl).href);
-      const bytes = Buffer.from(await response.arrayBuffer());
+      const bytes = await this.readBounded(response, latest.size);
       if (bytes.length !== latest.size) throw new Error(`download size ${bytes.length} does not match ${latest.size}`);
       if (createHash("sha256").update(bytes).digest("hex") !== latest.sha256) throw new Error("download checksum does not match");
+      checkZipBuffer(bytes);
       await mkdir(this.options.downloadDir, { recursive: true });
       const file = path.join(this.options.downloadDir, latest.file);
       await writeFile(file, bytes);

@@ -1,11 +1,11 @@
 // desktop/preload.cjs
-// v3 - 27-09-2026 - Automatic update settings, check and status events
+// v4 - 27-09-2026 - add() accepts explicit confirmation for a non-Knox backend
 
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("knox", {
   list: () => ipcRenderer.invoke("connections:list"),
-  add: (json, name) => ipcRenderer.invoke("connections:add", json, name),
+  add: (json, name, allowUnknownHosts) => ipcRenderer.invoke("connections:add", json, name, allowUnknownHosts === true),
   update: (id, changes, token) => ipcRenderer.invoke("connections:update", id, changes, token),
   remove: (id) => ipcRenderer.invoke("connections:remove", id),
   start: (id) => ipcRenderer.invoke("runtime:start", id),

@@ -1,5 +1,5 @@
 // desktop/updater-core.cjs
-// v1 - 27-09-2026 - Signed drop-in code updates: verify, install, select, crash guard (Node built-ins only)
+// v2 - 27-09-2026 - ZIP limits (size, entries, unpacked total) in the launcher reader
 
 // Part of the launcher: ships inside the app and is never replaced by an update, so a broken
 // update can always be replaced by a fixed one. No Electron imports; unit-tested under Node.
@@ -16,6 +16,7 @@ const LAUNCHER_API_VERSION = 1;
 const MANIFEST_FORMAT = 1;
 const PRODUCT = "knox-relay-bridge";
 const KEEP_VERSIONS = 2;
+const ZIP_LIMITS = { maxZipBytes: 30 * 1024 * 1024, maxEntries: 500, maxTotalBytes: 60 * 1024 * 1024 };
 
 function compareVersions(left, right) {
   const a = String(left).split(".").map((part) => Number.parseInt(part, 10) || 0);
@@ -80,14 +81,17 @@ function verifyCodeFolder(directory, publicKeyPem) {
 
 // Minimal ZIP reader (stored and deflated entries), enough for update packages.
 function readZip(buffer) {
+  if (buffer.length > ZIP_LIMITS.maxZipBytes) throw new Error("update file is too large");
   let end = -1;
   for (let offset = buffer.length - 22; offset >= Math.max(0, buffer.length - 65557); offset -= 1) {
     if (buffer.readUInt32LE(offset) === 0x06054b50) { end = offset; break; }
   }
   if (end < 0) throw new Error("not a ZIP file");
   const count = buffer.readUInt16LE(end + 10);
+  if (count > ZIP_LIMITS.maxEntries) throw new Error("update has too many files");
   let pointer = buffer.readUInt32LE(end + 16);
   const entries = [];
+  let total = 0;
   for (let index = 0; index < count; index += 1) {
     if (buffer.readUInt32LE(pointer) !== 0x02014b50) throw new Error("corrupt ZIP directory");
     const method = buffer.readUInt16LE(pointer + 10);
@@ -104,8 +108,10 @@ function readZip(buffer) {
     const raw = buffer.subarray(dataStart, dataStart + compressedSize);
     let data;
     if (method === 0) data = Buffer.from(raw);
-    else if (method === 8) data = zlib.inflateRawSync(raw);
+    else if (method === 8) data = zlib.inflateRawSync(raw, { maxOutputLength: ZIP_LIMITS.maxTotalBytes - total + 1 });
     else throw new Error(`unsupported ZIP compression ${method}`);
+    total += data.length;
+    if (total > ZIP_LIMITS.maxTotalBytes) throw new Error("update unpacks to more than the allowed size");
     entries.push({ name, data });
   }
   return entries;

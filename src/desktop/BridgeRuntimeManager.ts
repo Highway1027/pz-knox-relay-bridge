@@ -1,12 +1,12 @@
 // src/desktop/BridgeRuntimeManager.ts
-// v2 - 26-09-2026 - Preserve startup failures, explicit transitions, and idempotent shutdown
+// v3 - 27-09-2026 - Refuse non-HTTPS endpoints before the token is read
 
 import { DEFAULT_CONFIG, resolveExchangeDirectory, type KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { doctorLines, validateExchangeParent } from "../diagnostics/KnoxDiagnostics.js";
 import { KnoxLogger, type KnoxLogEvent } from "../logging/KnoxLogger.js";
 import { KnoxSyncEngine } from "../sync/KnoxSyncEngine.js";
 import type { ConnectionStore } from "./ConnectionStore.js";
-import type { ConnectionMetadata } from "./ConnectionTypes.js";
+import { assertSecureEndpoint, type ConnectionMetadata } from "./ConnectionTypes.js";
 
 export type RuntimePhase = "offline" | "starting" | "running" | "error" | "stopping";
 export interface ConnectionRuntimeState { connectionId: string; state: RuntimePhase; backend: "unknown" | "online" | "offline"; exchangeDirectory?: string; lastTelemetrySync?: string; lastMissionSync?: string; playerCount?: number; lastError?: string }
@@ -21,6 +21,10 @@ export class BridgeRuntimeManager {
     return { ...state, exchangeDirectory: exchange.directory };
   }
   private async config(connection: ConnectionMetadata): Promise<KnoxBridgeConfig> {
+    // Also covers connections saved before HTTPS was enforced: refuse before the token is read.
+    assertSecureEndpoint(connection.telemetryEndpoint, "telemetryEndpoint");
+    assertSecureEndpoint(connection.missionSyncEndpoint, "missionSyncEndpoint");
+    if (connection.syncEndpoint) assertSecureEndpoint(connection.syncEndpoint, "syncEndpoint");
     const token = await this.store.token(connection.id); const exchange = resolveExchangeDirectory(connection.exchangeRootOverride ? { exchangeRoot: connection.exchangeRootOverride } : {});
     return { ...DEFAULT_CONFIG, networkId: connection.networkId, connectorToken: token, telemetryEndpoint: connection.telemetryEndpoint, missionSyncEndpoint: connection.missionSyncEndpoint, syncEndpoint: connection.syncEndpoint ?? DEFAULT_CONFIG.syncEndpoint, exchangeDirectory: exchange.directory, exchangeDirectorySource: exchange.source };
   }

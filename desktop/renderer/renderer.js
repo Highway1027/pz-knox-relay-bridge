@@ -1,5 +1,5 @@
 // desktop/renderer/renderer.js
-// v6 - 27-09-2026 - Show every update check result on the main page; auto-dismiss and close button
+// v7 - 27-09-2026 - Confirm setup text that points to a non-Knox backend
 
 if (!window.knox) {
   document.body.innerHTML = `<main class="fatal"><h1>Knox Relay Bridge failed to initialize.</h1><p>The desktop bridge API could not be loaded.</p><p>Open Developer Tools for diagnostics.</p></main>`;
@@ -81,7 +81,27 @@ if (!window.knox) {
   });
   document.querySelectorAll("nav button").forEach((button) => { button.onclick = () => show(button.dataset.view); });
   $("back").onclick = () => show("overview"); $("add-button").onclick = () => $("add-dialog").showModal();
-  $("save-connection").onclick = async () => { try { $("add-error").textContent = ""; await api.add($("setup-json").value, $("connection-name").value); $("add-dialog").close(); $("setup-json").value = ""; $("connection-name").value = ""; await refresh(); } catch (error) { $("add-error").textContent = error.message; } };
+  // A setup text for a server other than the Knox Relay backend needs a second, deliberate click.
+  let allowUnknownHosts = false;
+  const resetAddDialog = () => { allowUnknownHosts = false; $("save-connection").textContent = "Validate & Save"; $("add-error").textContent = ""; };
+  $("setup-json").oninput = resetAddDialog;
+  $("save-connection").onclick = async () => {
+    try {
+      $("add-error").textContent = "";
+      await api.add($("setup-json").value, $("connection-name").value, allowUnknownHosts);
+      $("add-dialog").close(); $("setup-json").value = ""; $("connection-name").value = ""; resetAddDialog(); await refresh();
+    } catch (error) {
+      const message = String(error.message || error);
+      const unknownHost = message.indexOf("UNKNOWN_HOST: ");
+      if (unknownHost >= 0) {
+        allowUnknownHosts = true;
+        $("save-connection").textContent = "Save anyway";
+        $("add-error").textContent = message.slice(unknownHost + "UNKNOWN_HOST: ".length);
+      } else {
+        $("add-error").textContent = message;
+      }
+    }
+  };
   $("debug-connection").onchange = renderLogs; $("level").onchange = renderLogs;
   $("pause").onclick = () => { state.paused = !state.paused; $("pause").textContent = state.paused ? "Resume" : "Pause"; renderLogs(); };
   $("clear").onclick = () => { state.logs.set($("debug-connection").value, []); renderLogs(); };
