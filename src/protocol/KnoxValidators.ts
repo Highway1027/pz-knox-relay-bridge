@@ -1,6 +1,7 @@
 // src/protocol/KnoxValidators.ts
-// v6 - 26-09-2026 - Harden dynamic verified-location mission mechanics
+// v7 - 27-09-2026 - Optional telemetry snapshot and open knox_ missions (envelope checks)
 
+import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
@@ -43,7 +44,9 @@ export function validateGameTelemetry(value: unknown): GameTelemetryMessage {
   if (typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId)) throw new Error("invalid messageId");
   if (typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt))) throw new Error("invalid createdAt");
   const payload = message.payload as Record<string, unknown>;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload) || !exactKeys(payload, ["gameTime", "players"])) throw new Error("invalid payload");
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !(exactKeys(payload, ["gameTime", "players"]) || exactKeys(payload, ["gameTime", "players", "snapshot"]))) throw new Error("invalid payload");
+  if (payload.snapshot !== undefined) validateSnapshot(payload.snapshot);
   const gameTime = payload.gameTime as Record<string, unknown>;
   if (!gameTime || typeof gameTime !== "object" || Array.isArray(gameTime) || !exactKeys(gameTime, ["year", "month", "day", "hour", "minute"])) throw new Error("invalid gameTime");
   const time = [gameTime.year, gameTime.month, gameTime.day, gameTime.hour, gameTime.minute];
@@ -77,7 +80,11 @@ const MISSIONS = {
 } as const;
 
 function isMissionId(value: unknown): value is MissionId {
-  return typeof value === "string" && (Object.prototype.hasOwnProperty.call(MISSIONS, value) || /^mission_v0[2]?_[a-z0-9_]{1,96}$/.test(value));
+  return typeof value === "string" && (Object.prototype.hasOwnProperty.call(MISSIONS, value) || /^mission_v0[2]?_[a-z0-9_]{1,96}$/.test(value) || ENVELOPE_MISSION_ID.test(value));
+}
+
+function isEnvelopeMissionId(value: unknown): boolean {
+  return typeof value === "string" && ENVELOPE_MISSION_ID.test(value);
 }
 
 function exactJson(left: unknown, right: unknown): boolean {
@@ -101,6 +108,8 @@ function validAreaObjective(value: unknown, expected: (typeof MISSIONS)["test_00
 export function validateTestMission(value: unknown): ConnectorMission {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("mission must be an object");
   const mission = value as Record<string, unknown>;
+  // Open missions from the mission engine: envelope only, content is validated by the Connector.
+  if (isEnvelopeMissionId(mission.missionId)) return validateEnvelopeMission(mission) as unknown as ConnectorMission;
   const curated = typeof mission.missionId === 'string' && (mission.missionId.startsWith('mission_v0_') || mission.missionId.startsWith('mission_v02_'));
   const curatedKeys = ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture", "location", "chain", "narrative"];
   if (!(curated ? exactKeys(mission, curatedKeys) || exactKeys(mission, [...curatedKeys, "navigationContext"])
@@ -170,6 +179,12 @@ export function validateMissionReceivedAcknowledgement(value: unknown): MissionR
   return message as unknown as MissionReceivedAcknowledgement;
 }
 
+// Curated and test missions are always version 1; open missions may be revised.
+function validMissionVersion(missionId: unknown, version: unknown): boolean {
+  if (isEnvelopeMissionId(missionId)) return Number.isInteger(version) && Number(version) >= 1 && Number(version) <= 100000;
+  return version === 1;
+}
+
 export function validateMissionCompleted(value: unknown): MissionCompletedMessage {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('message root must be an object');
   const message = value as Record<string, unknown>;
@@ -178,7 +193,9 @@ export function validateMissionCompleted(value: unknown): MissionCompletedMessag
       message.type !== 'mission_completed' || typeof message.messageId !== 'string' || !MESSAGE_ID_PATTERN.test(message.messageId) ||
       typeof message.createdAt !== 'string' || Number.isNaN(Date.parse(message.createdAt)) || !payload || Array.isArray(payload) ||
       !exactKeys(payload, ['missionId', 'missionVersion', 'objectiveType', 'completedBy']) || !isMissionId(payload.missionId) ||
-      payload.missionVersion !== 1 || payload.objectiveType !== 'visit_area' || typeof payload.completedBy !== 'string')
+      !validMissionVersion(payload.missionId, payload.missionVersion) || typeof payload.completedBy !== 'string' ||
+      (isEnvelopeMissionId(payload.missionId) ? typeof payload.objectiveType !== 'string' || !/^[a-z_]{1,40}$/.test(payload.objectiveType)
+        : payload.objectiveType !== 'visit_area'))
     throw new Error('invalid mission completion');
   return message as unknown as MissionCompletedMessage;
 }
@@ -191,7 +208,7 @@ export function validateMissionDeclined(value: unknown): MissionDeclinedMessage 
       message.type !== 'mission_declined' || typeof message.messageId !== 'string' || !MESSAGE_ID_PATTERN.test(message.messageId) ||
       typeof message.createdAt !== 'string' || Number.isNaN(Date.parse(message.createdAt)) || !payload || Array.isArray(payload) ||
       !exactKeys(payload, ['missionId', 'missionVersion', 'declinedBy']) || !isMissionId(payload.missionId) ||
-      payload.missionVersion !== 1 || typeof payload.declinedBy !== 'string' || payload.declinedBy.length < 1)
+      !validMissionVersion(payload.missionId, payload.missionVersion) || typeof payload.declinedBy !== 'string' || payload.declinedBy.length < 1)
     throw new Error('invalid mission decline');
   return message as unknown as MissionDeclinedMessage;
 }

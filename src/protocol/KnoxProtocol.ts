@@ -1,5 +1,5 @@
 // src/protocol/KnoxProtocol.ts
-// v7 - 26-09-2026 - Add dynamic verified-location visit mission contracts
+// v8 - 27-09-2026 - Optional telemetry snapshot; open knox_ mission ids
 
 export const KNOX_PROTOCOL_VERSION = 1 as const;
 
@@ -53,6 +53,8 @@ export interface GameTelemetryMessage {
   payload: {
     gameTime: { year: number; month: number; day: number; hour: number; minute: number };
     players: GameTelemetryPlayer[];
+    // World/player summary from Connector 0.13.0+, about once a minute. Checked as a bounded envelope.
+    snapshot?: Record<string, unknown>;
   };
 }
 
@@ -69,7 +71,7 @@ export interface KnoxTelemetryResponse {
 
 export type MissionId = "test_001" | "test_002" | "test_003" | "test_004" | "test_005" | "test_006" | "test_007"
   | "mission_v0_muldraugh_checkin" | "mission_v0_fallas_recon" | "mission_v0_echo_recon"
-  | "mission_v0_march_recon" | "mission_v0_westpoint_recon" | `mission_v02_${string}`;
+  | "mission_v0_march_recon" | "mission_v0_westpoint_recon" | `mission_v02_${string}` | `knox_${string}`;
 
 export interface DeliveryArea {
   type: "radius";
@@ -140,7 +142,7 @@ export interface MissionCompletedMessage {
   messageId: string;
   type: "mission_completed";
   createdAt: string;
-  payload: { missionId: MissionId; missionVersion: 1; objectiveType: "visit_area"; completedBy: string };
+  payload: { missionId: MissionId; missionVersion: number; objectiveType: string; completedBy: string };
 }
 
 export interface MissionDeclinedMessage {
@@ -148,5 +150,5 @@ export interface MissionDeclinedMessage {
   messageId: string;
   type: "mission_declined";
   createdAt: string;
-  payload: { missionId: MissionId; missionVersion: 1; declinedBy: string };
+  payload: { missionId: MissionId; missionVersion: number; declinedBy: string };
 }
