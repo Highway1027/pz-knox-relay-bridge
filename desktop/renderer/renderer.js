@@ -1,5 +1,5 @@
 // desktop/renderer/renderer.js
-// v4 - 27-09-2026 - Settings: running version, install update, restart, revert
+// v5 - 27-09-2026 - Automatic updates: setting, check now, ready banner
 
 if (!window.knox) {
   document.body.innerHTML = `<main class="fatal"><h1>Knox Relay Bridge failed to initialize.</h1><p>The desktop bridge API could not be loaded.</p><p>Open Developer Tools for diagnostics.</p></main>`;
@@ -109,6 +109,28 @@ if (!window.knox) {
     $("update-result").textContent = "The built-in version runs after a restart.";
     $("restart-app").hidden = false;
   };
+  // Automatic updates: a ready update shows a banner; it also applies at the next start.
+  function showUpdateStatus(status) {
+    if (!status) return;
+    const when = status.checkedAt ? ` (checked ${new Date(status.checkedAt).toLocaleTimeString()})` : "";
+    if (status.status === "installed") {
+      const running = [...state.statuses.values()].some((item) => item.state === "running");
+      $("update-banner-text").textContent = `Knox Relay Bridge ${status.version} is ready.` + (running ? " Restarting stops running connections; otherwise it applies the next time you start the Bridge." : " Restart to use it.");
+      $("update-banner").hidden = false;
+      $("update-result").textContent = `Update ${status.version} is installed and runs after a restart.`;
+      $("restart-app").hidden = false;
+    } else if (status.status === "up-to-date") {
+      $("update-result").textContent = `Up to date${when}.`;
+    } else if (status.status === "error") {
+      $("update-result").textContent = `Could not check for updates${when}: ${status.reason}`;
+    }
+  }
+  $("banner-restart").onclick = () => api.restart();
+  $("banner-later").onclick = () => { $("update-banner").hidden = true; };
+  $("check-update").onclick = async () => { $("update-result").textContent = "Checking for updates…"; showUpdateStatus({ ...(await api.checkForUpdate()), checkedAt: new Date().toISOString() }); };
+  $("auto-update").onchange = async () => { await api.setAutoUpdate($("auto-update").checked); };
+  api.onUpdateStatus(showUpdateStatus);
+  (async () => { $("auto-update").checked = await api.getAutoUpdate(); showUpdateStatus(await api.lastUpdate()); })();
   renderVersion();
   refresh();
 }

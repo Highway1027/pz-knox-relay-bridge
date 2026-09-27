@@ -1,5 +1,5 @@
 // desktop/preload.cjs
-// v2 - 27-09-2026 - Add app version, update install and restart
+// v3 - 27-09-2026 - Automatic update settings, check and status events
 
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -18,6 +18,15 @@ contextBridge.exposeInMainWorld("knox", {
   installUpdate: () => ipcRenderer.invoke("update:install"),
   revertUpdate: () => ipcRenderer.invoke("update:revert"),
   restart: () => ipcRenderer.invoke("app:restart"),
+  getAutoUpdate: () => ipcRenderer.invoke("update:auto:get"),
+  setAutoUpdate: (enabled) => ipcRenderer.invoke("update:auto:set", enabled),
+  checkForUpdate: () => ipcRenderer.invoke("update:check"),
+  lastUpdate: () => ipcRenderer.invoke("update:last"),
+  onUpdateStatus: (listener) => {
+    const handler = (_event, status) => listener(status);
+    ipcRenderer.on("update:status", handler);
+    return () => ipcRenderer.removeListener("update:status", handler);
+  },
   onLog: (listener) => {
     const handler = (_event, id, item) => listener(id, item);
     ipcRenderer.on("runtime:log", handler);

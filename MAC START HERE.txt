@@ -1,5 +1,5 @@
 MAC START HERE.txt
-v2 - 27-09-2026 - Last rebuild: later updates install from Settings
+v3 - 27-09-2026 - Last rebuild: later updates arrive automatically
 
 FOR RODI
 
@@ -22,18 +22,18 @@ The builder detects the Mac hardware, including Apple Silicon under Rosetta:
 - Apple Silicon: arm64, release/mac-arm64/Knox Relay Bridge.app
 This builds one native architecture, not a universal app.
 
-LATER UPDATES (NO REBUILD)
+LATER UPDATES (AUTOMATIC, NO REBUILD)
 
-This build (0.2.0) is the last one you build yourself. Later Bridge updates arrive as a
-file named "Knox Relay Bridge Update <version>.zip". Keep it zipped:
-
-1. Open Knox Relay Bridge.app, go to Settings, click "Install update…".
-2. Pick the update ZIP. The Bridge checks it is a genuine Knox Relay update.
-3. Click "Restart now". Settings then shows the new version.
+This build (0.2.0) is the last one you build yourself. After that the Bridge updates
+itself: when Tim publishes a new version, the Bridge downloads it (shortly after you open
+it, and every few hours), checks it is a genuine Knox Relay update, and shows a banner:
+"Restart now" or "Later". Later simply means it runs the next time you open the Bridge.
 
 Your connections stay. macOS asks nothing, because the app itself does not change.
 If an update ever fails to start, the Bridge automatically goes back to the built-in
-version. A new rebuild is only needed when Tim says the launcher itself changed.
+version. Settings shows the running version, a "Check now" button, an "Update
+automatically" switch, and "Install update file…" for a ZIP Tim sends by hand.
+A new rebuild is only needed when Tim says the launcher itself changed.
 
 FIRST OPEN / GATEKEEPER
 

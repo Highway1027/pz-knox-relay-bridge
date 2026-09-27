@@ -1,5 +1,5 @@
 // scripts/package-update.mjs
-// v1 - 27-09-2026 - Build a signed drop-in update ZIP: release/Knox Relay Bridge Update <version>.zip
+// v2 - 27-09-2026 - Release-friendly name, latest.json feed, key from KNOX_UPDATE_PRIVATE_KEY_PEM (CI)
 
 // Contains the updatable code only (dist/src, desktop/preload.cjs, desktop/renderer, a minimal
 // package.json), a manifest with the SHA-256 of every file, and the manifest's Ed25519 signature.
@@ -8,7 +8,8 @@
 // Run `npm run build` first (npm run update:package does).
 
 import { createRequire } from "node:module";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import yazl from "yazl";
@@ -17,9 +18,12 @@ const require = createRequire(import.meta.url);
 const core = require("../desktop/updater-core.cjs");
 
 const LAUNCHER_ONLY = new Set(["desktop/launcher.cjs", "desktop/updater-core.cjs", "desktop/update-public-key.pem"]);
+// The GitHub release workflow passes the key content in KNOX_UPDATE_PRIVATE_KEY_PEM (a repository secret);
+// locally it is read from the key file created by npm run update:keygen.
 const privateKeyPath = process.env.KNOX_UPDATE_PRIVATE_KEY ?? path.join(homedir(), ".knox-relay", "bridge-update-private.pem");
-if (!existsSync(privateKeyPath)) {
-  console.error(`No signing key at ${privateKeyPath}. Run "npm run update:keygen" once first.`);
+const privateKeyPem = process.env.KNOX_UPDATE_PRIVATE_KEY_PEM || (existsSync(privateKeyPath) ? readFileSync(privateKeyPath, "utf8") : "");
+if (!privateKeyPem) {
+  console.error(`No signing key at ${privateKeyPath} and no KNOX_UPDATE_PRIVATE_KEY_PEM. Run "npm run update:keygen" once first.`);
   process.exit(1);
 }
 
@@ -55,7 +59,7 @@ const manifest = {
   format: core.MANIFEST_FORMAT, product: core.PRODUCT, version, minLauncher: core.LAUNCHER_API_VERSION,
   createdAt: new Date().toISOString(), files,
 };
-const signature = core.signManifest(manifest, readFileSync(privateKeyPath, "utf8"));
+const signature = core.signManifest(manifest, privateKeyPem);
 
 // Self-check with the public key that ships in the app, before anything is written.
 const publicKeyPem = readFileSync(path.join("desktop", "update-public-key.pem"), "utf8");
@@ -66,11 +70,17 @@ if (!verify(null, Buffer.from(core.canonicalJson(manifest)), publicKeyPem, Buffe
 }
 
 mkdirSync("release", { recursive: true });
-const output = path.join("release", `Knox Relay Bridge Update ${version}.zip`);
+// No spaces: GitHub renames release assets with spaces, and the updater downloads by exact name.
+const fileName = `knox-relay-bridge-update-${version}.zip`;
+const output = path.join("release", fileName);
 const zip = new yazl.ZipFile();
 for (const [relative, buffer] of contents) zip.addBuffer(buffer, relative);
 zip.addBuffer(Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`), "manifest.json");
 zip.addBuffer(Buffer.from(`${signature}\n`), "manifest.sig");
 zip.end();
 await new Promise((resolve, reject) => zip.outputStream.pipe(createWriteStream(output)).on("close", resolve).on("error", reject));
-console.log(`Created ${output}: version ${version}, ${Object.keys(files).length} files, ${statSync(output).size} bytes, signed.`);
+// Feed read by the Bridge auto-updater (src/desktop/AutoUpdater.ts) from the latest GitHub release.
+const zipBytes = readFileSync(output);
+const latest = { version, file: fileName, sha256: createHash("sha256").update(zipBytes).digest("hex"), size: zipBytes.length, publishedAt: manifest.createdAt };
+writeFileSync(path.join("release", "latest.json"), `${JSON.stringify(latest, null, 2)}\n`);
+console.log(`Created ${output}: version ${version}, ${Object.keys(files).length} files, ${statSync(output).size} bytes, signed. Feed: release/latest.json`);

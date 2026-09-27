@@ -1,5 +1,5 @@
 // src/desktop/main.ts
-// v4 - 27-09-2026 - Load UI from the launcher-selected code root; Settings update install and restart
+// v5 - 27-09-2026 - Automatic updates from the published release feed
 
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { ConnectionStore, type SecretVault } from "./ConnectionStore.js";
 import { parseConnectionImport } from "./ConnectionTypes.js";
 import { BridgeRuntimeManager } from "./BridgeRuntimeManager.js";
 import { DEFAULT_CONFIG } from "../config/KnoxBridgeConfig.js";
+import { AutoUpdater, type CheckResult } from "./AutoUpdater.js";
 
 // Set by desktop/launcher.cjs. Absent when main.js is started directly (npm run desktop without the launcher).
 type Launcher = { apiVersion: number; codeRoot: string; version: string; source: "built-in" | "update"; builtInVersion: string; notes: string[];
@@ -16,7 +17,38 @@ type Launcher = { apiVersion: number; codeRoot: string; version: string; source:
 const launcher = (globalThis as { knoxLauncher?: Launcher }).knoxLauncher;
 // The UI (preload + renderer) comes from the same code root as this file, so updates can change it too.
 const codeRoot = launcher?.codeRoot ?? app.getAppPath();
-let window: BrowserWindow | undefined; let store: ConnectionStore; let runtime: BridgeRuntimeManager; let shuttingDown = false; let smokeInProgress = false;
+let window: BrowserWindow | undefined;
+const UPDATE_FIRST_CHECK_MS = 15000;
+const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let updater: AutoUpdater | undefined; let lastUpdate: (CheckResult & { checkedAt: string }) | undefined;
+// Local preferences of this installation (not synced anywhere).
+function settingsPath(): string { return path.join(app.getPath("userData"), "bridge-settings.json"); }
+async function readSettings(): Promise<{ autoUpdate: boolean }> {
+  try { const value = JSON.parse(await readFile(settingsPath(), "utf8")) as { autoUpdate?: unknown }; return { autoUpdate: value.autoUpdate !== false }; }
+  catch { return { autoUpdate: true }; }
+}
+async function checkForUpdate(): Promise<CheckResult | undefined> {
+  if (!updater) return undefined;
+  const result = await updater.check();
+  lastUpdate = { ...result, checkedAt: new Date().toISOString() };
+  const target = window;
+  if (target && !target.isDestroyed() && !target.webContents.isDestroyed()) target.webContents.send("update:status", lastUpdate);
+  return result;
+}
+async function scheduleUpdates(): Promise<void> {
+  if (!launcher || process.env.KNOX_SMOKE_REPORT || process.env.KNOX_DISABLE_AUTO_UPDATE) return;
+  const active = launcher;
+  updater = new AutoUpdater({
+    currentVersion: () => active.version,
+    install: (file) => active.installUpdate(file),
+    downloadDir: path.join(app.getPath("userData"), "app-code", "downloads"),
+    feedUrl: process.env.KNOX_UPDATE_FEED_URL,
+    log: (message) => console.log(`[Knox Relay Bridge] ${message}`),
+  });
+  const run = async () => { if ((await readSettings()).autoUpdate) await checkForUpdate(); };
+  setTimeout(() => { void run(); }, UPDATE_FIRST_CHECK_MS);
+  setInterval(() => { void run(); }, UPDATE_INTERVAL_MS);
+} let store: ConnectionStore; let runtime: BridgeRuntimeManager; let shuttingDown = false; let smokeInProgress = false;
 const legacyPath = path.resolve("config.json");
 if (process.env.KNOX_SMOKE_USER_DATA) app.setPath("userData", process.env.KNOX_SMOKE_USER_DATA);
 const vault: SecretVault = {
@@ -43,6 +75,10 @@ function registerIpc(): void {
     if (!picked || picked.canceled || picked.filePaths.length === 0) return { ok: false, cancelled: true };
     return launcher.installUpdate(picked.filePaths[0] as string);
   });
+  ipcMain.handle("update:auto:get", async () => (await readSettings()).autoUpdate);
+  ipcMain.handle("update:auto:set", async (_event, enabled: boolean) => { await writeFile(settingsPath(), `${JSON.stringify({ autoUpdate: enabled === true }, null, 2)}\n`, "utf8"); return enabled === true; });
+  ipcMain.handle("update:check", async () => (await checkForUpdate()) ?? { status: "error", reason: "Automatic updates need the update launcher; rebuild the Bridge once." });
+  ipcMain.handle("update:last", () => lastUpdate ?? null);
   ipcMain.handle("update:revert", () => { launcher?.revertToBuiltIn(); return { ok: true }; });
   ipcMain.handle("app:restart", () => { shuttingDown = true; runtime?.stopAll(); app.relaunch(); app.quit(); });
   ipcMain.handle("legacy:import", async (_event, name: string) => { const raw = await legacy(); if (!raw) throw new Error("Legacy config.json was not found"); return store.add(parseConnectionImport({ telemetryEndpoint: DEFAULT_CONFIG.telemetryEndpoint, missionSyncEndpoint: DEFAULT_CONFIG.missionSyncEndpoint, ...raw }), name); });
@@ -112,7 +148,7 @@ app.whenReady().then(async () => {
     if (shuttingDown || !target || target.isDestroyed() || target.webContents.isDestroyed()) return;
     try { target.webContents.send("runtime:log", id, event); } catch (error) { console.error("Renderer log delivery failed safely:", error instanceof Error ? error.message : String(error)); }
   });
-  registerIpc(); await createWindow();
+  registerIpc(); await createWindow(); await scheduleUpdates();
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow(); });
 }).catch((error) => { console.error(error); app.quit(); });
 app.on("window-all-closed", () => { if (!smokeInProgress) app.quit(); });

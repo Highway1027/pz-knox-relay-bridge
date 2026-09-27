@@ -1,5 +1,5 @@
 <!-- docs/DESKTOP.md -->
-<!-- v6 - 27-09-2026 - Drop-in signed code updates (launcher 1, app 0.2.0) -->
+<!-- v7 - 27-09-2026 - Automatic updates from GitHub Releases; release on push to main -->
 
 # Desktop Bridge
 
@@ -48,7 +48,7 @@ Before public distribution: add production icons and metadata, configure code-si
 
 ## Drop-in updates (since 0.2.0)
 
-Install the app once; later versions arrive as a signed ZIP installed from **Settings → Install update…**. No rebuild, no Gatekeeper or Keychain prompts, connections kept.
+Install the app once; later versions arrive as signed code updates. The Bridge downloads them itself from the latest GitHub Release (15 seconds after start, then every 6 hours; Settings → "Update automatically" turns this off), or a ZIP can be picked in **Settings → Install update file…**. No rebuild, no Gatekeeper or Keychain prompts, connections kept. A downloaded update is installed at once and runs after the next restart; a banner offers "Restart now" or "Later".
 
 How it works:
 
@@ -60,13 +60,18 @@ How it works:
 
 Publishing an update (Tim):
 
-1. Raise `version` in `package.json` (e.g. 0.2.0 → 0.2.1).
-2. `npm run update:package` builds and signs `release/Knox Relay Bridge Update <version>.zip`, after checking the signing key matches the public key in the app.
-3. Send that ZIP unchanged. Users pick it in Settings → Install update… and press Restart now.
+1. Work on `develop`; nothing is published from it.
+2. When a build is done: raise `version` in `package.json` (e.g. 0.2.0 → 0.2.1) and merge to `main`.
+3. `.github/workflows/release.yml` runs the tests and, only if that version has no release yet, builds and signs `knox-relay-bridge-update-<version>.zip` plus `latest.json` and publishes GitHub Release `v<version>`. A push to `main` without a new version publishes nothing.
+4. Every Bridge with automatic updates picks it up at its next check.
+
+Manual fallback: `npm run update:package` builds the same signed ZIP and `latest.json` in `release/` from the local key.
+
+One-time GitHub setup: repository Settings → Environments → new environment `release`, deployment branches limited to `main`, with environment secret `KNOX_UPDATE_PRIVATE_KEY_PEM` = the full content of the private key file (including the BEGIN and END lines). The workflow reads the key only in that environment; pull requests from forks never get it.
 
 Signing key: created once with `npm run update:keygen` at `%USERPROFILE%\.knox-relay\bridge-update-private.pem` (override with `KNOX_UPDATE_PRIVATE_KEY`). It never goes into a repository or ZIP. **Back it up**: without it no further updates can be signed, and every user would have to rebuild once with a new public key.
 
-Verified 27-09-2026 in the packaged Windows app with isolated profiles: built-in start; signed update 0.2.1 loaded and reported healthy; a tampered update rejected with the built-in version running. `tests/KnoxUpdater.test.ts` covers signatures, tampering, ZIP safety, versions and the crash guard.
+Verified 27-09-2026 in the packaged Windows app with isolated profiles: built-in start; signed update 0.2.1 loaded and reported healthy; a tampered update rejected with the built-in version running; and automatic update: a 0.2.0 app fetched `latest.json` and the ZIP from a local release feed, installed 0.2.1 by itself and ran it healthy after a restart. `tests/KnoxUpdater.test.ts` and `tests/KnoxAutoUpdater.test.ts` cover signatures, tampering, ZIP safety, versions, the crash guard, checksums, wrong keys and offline behaviour.
 
 ## Manual test checklist
 
