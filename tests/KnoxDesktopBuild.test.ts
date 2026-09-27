@@ -1,5 +1,5 @@
 // tests/KnoxDesktopBuild.test.ts
-// v2 - 27-09-2026 - Preload path comes from the launcher-selected code root
+// v3 - 27-09-2026 - Guard: the hidden attribute must beat display rules (update banner)
 
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
@@ -46,4 +46,13 @@ test("main process guards renderer log delivery during idempotent shutdown", asy
 test("renderer presents startup transitions and retained errors", async () => {
   const renderer = await readFile(path.resolve("desktop", "renderer", "renderer.js"), "utf8");
   assert.match(renderer, /Starting…/); assert.match(renderer, /Stopping…/); assert.match(renderer, /runtime\.lastError/); assert.match(renderer, /Cannot start/);
+});
+
+test("hidden elements stay hidden even when a class sets display", async () => {
+  // Regression: .update-banner{display:flex} overrode [hidden], so the banner showed empty and × could not close it.
+  const css = await readFile(path.resolve("desktop", "renderer", "styles.css"), "utf8");
+  assert.ok(css.includes("[hidden]{display:none!important}"), "styles.css must force [hidden] to display:none");
+  const html = await readFile(path.resolve("desktop", "renderer", "index.html"), "utf8");
+  assert.match(html, /id="update-banner"[^>]*hidden/);
+  assert.match(html, /id="banner-close"/);
 });
