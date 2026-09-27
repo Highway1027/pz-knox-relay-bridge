@@ -1,6 +1,6 @@
 #!/bin/bash
 # BUILD KNOX RELAY BRIDGE.command
-# v1 - 26-09-2026 - One-time native Mac build with Finder reveal and readable failures
+# v2 - 27-09-2026 - Install exact locked dependencies (npm ci)
 
 finish() {
   result=$?
