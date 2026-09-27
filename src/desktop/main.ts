@@ -1,5 +1,5 @@
 // src/desktop/main.ts
-// v5 - 27-09-2026 - Automatic updates from the published release feed
+// v6 - 27-09-2026 - First update check 3 s after start so the result shows on opening
 
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import path from "node:path";
@@ -18,7 +18,7 @@ const launcher = (globalThis as { knoxLauncher?: Launcher }).knoxLauncher;
 // The UI (preload + renderer) comes from the same code root as this file, so updates can change it too.
 const codeRoot = launcher?.codeRoot ?? app.getAppPath();
 let window: BrowserWindow | undefined;
-const UPDATE_FIRST_CHECK_MS = 15000;
+const UPDATE_FIRST_CHECK_MS = 3000;
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let updater: AutoUpdater | undefined; let lastUpdate: (CheckResult & { checkedAt: string }) | undefined;
 // Local preferences of this installation (not synced anywhere).

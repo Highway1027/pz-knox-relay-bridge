@@ -1,9 +1,9 @@
 <!doctype html>
 <!-- desktop/renderer/index.html -->
-<!-- v3 - 27-09-2026 - Automatic updates: setting, check now, ready banner -->
+<!-- v4 - 27-09-2026 - Update notice with close button; auto-dismiss for check results -->
 <html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Knox Relay Bridge</title><link rel="stylesheet" href="styles.css"></head>
 <body><header><div><span class="signal">KRB</span><h1>Knox Relay Bridge</h1></div><nav><button data-view="overview" class="active">Overview</button><button data-view="debug">Debug</button><button data-view="settings">Settings</button></nav></header>
-<div id="update-banner" class="update-banner" hidden><span id="update-banner-text"></span><button id="banner-restart" class="primary">Restart now</button><button id="banner-later">Later</button></div>
+<div id="update-banner" class="update-banner" role="status" aria-live="polite" hidden><span id="update-banner-text"></span><button id="banner-restart" class="primary" hidden>Restart now</button><button id="banner-later" hidden>Later</button><button id="banner-close" class="banner-close" title="Dismiss" aria-label="Dismiss">×</button></div>
 <main>
   <section id="overview" class="view active"><div class="title-row"><div><p class="eyebrow">NETWORK COMPANION</p><h2>Connections</h2></div><button id="add-button" class="primary">+ Add Connection</button></div><div id="connections" class="cards"></div><div id="empty" class="empty">No Relay connections saved.<br><span>Paste setup JSON from the Knox Relay webapp to begin.</span></div></section>
   <section id="detail" class="view"><button id="back">← Connections</button><div id="detail-content"></div></section>
