@@ -42,7 +42,7 @@ On PowerShell with scripts disabled use `npm.cmd` instead of `npm`.
 ## Focus, skills, writing
 
 - At session start name the top open Knox items. When a new idea comes up mid-task, ask **"Now, or park it in the backlog?"** (small same-area fixes excepted); parked ideas go to the Inbox in the Connector `docs/STATUS.md`.
-- Skills: `bridge-release` (here), `pz-debug` and `wrap-up` (point to the Connector's). Fix a skill as soon as it proves wrong; propose one when a routine repeats.
+- Skills: `bridge-release` (here), `pz-debug` and `knox-wrap-up` (point to the Connector's). Fix a skill as soon as it proves wrong; propose one when a routine repeats.
 - Tim prefers plain English, short sentences, dates as DD-MM-YYYY.
 
 ## Docs
