@@ -2,13 +2,15 @@
 
 Rules and context for every AI coding agent (Claude Code, Antigravity, Codex). This is the single source; tool-specific files only point here.
 
-**Start of a session:** read `D:\Game mods\Zomboid\Knox Relay Connector\docs\STATUS.md`. Knox status, plan (`docs/KNOX_PROJECT_PLAN.md`) and history live in the Connector repo for all Knox parts.
+Paths below use `<drive>`: `D:` on Tim's desktop, `C:` on his other PCs.
+
+**Start of a session:** read `<drive>:\Game mods\Zomboid\Knox Relay Connector\docs\STATUS.md`. Knox status, plan (`docs/KNOX_PROJECT_PLAN.md`) and history live in the Connector repo for all Knox parts.
 
 ## What this repo is
 
 Electron desktop app (TypeScript) that carries messages between Project Zomboid's local exchange files (`<home>/Zomboid/Lua/KnoxRelay`) and the Knox backend over HTTPS. **Transport only**: it validates and relays, but owns no gameplay, mission, location or reward decisions (those belong to the Connector and the backend). Users: Tim (Windows) and Rodi (Mac).
 
-Other parts: Connector (PZ Lua, gameplay authority) in `D:\Game mods\Zomboid\Knox Relay Connector`; webapp and backend in `D:\Webapps\wildshape-tracker`.
+Other parts: Connector (PZ Lua, gameplay authority) in `<drive>:\Game mods\Zomboid\Knox Relay Connector`; webapp and backend in `<drive>:\Webapps\wildshape-tracker`.
 
 ## Commands
 
