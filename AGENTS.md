@@ -39,7 +39,6 @@ On PowerShell with scripts disabled use `npm.cmd` instead of `npm`.
 
 - Work on `develop`. A release is: raise `version` in `package.json`, merge `develop` into `main`. `.github/workflows/release.yml` then tests, signs and publishes a GitHub Release when the version is new; installed apps update themselves. Only with Tim's OK. Use the `bridge-release` skill.
 - Commit messages carry the details; no file version headers needed (leave existing ones alone).
-- `IMPLEMENTATION_PLAN.md` and `walkthrough.md` are old, git-ignored local notes; the Connector plan supersedes them.
 
 ## Focus, skills, writing
 
