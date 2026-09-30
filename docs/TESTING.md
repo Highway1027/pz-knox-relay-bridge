@@ -16,6 +16,8 @@
 
 ## Phase 4 gate
 
+Historical: passed; the `test_001` mission used here was removed in Bridge 0.2.5 (30-09-2026).
+
 Start Bridge and B42.20.4, then use Network Settings → Connector Setup → Send Test Mission to PZ. Confirm the Bridge logs mission receipt/queue and PZ logs `Mission received: test_001 - Connector Test Mission`. Confirm PZ's acknowledgement moves both local files to processed. Restart Bridge/PZ and confirm the mission is not recreated or logged forever.
 
 Do not begin native mission UI or gameplay until Tim confirms this gate.

@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import test from "node:test";
 import { DEFAULT_CONFIG } from "../src/config/KnoxBridgeConfig.js";
 import { KnoxApiClient } from "../src/http/KnoxApiClient.js";
-import { validateMissionDeclined, validateTestMission } from "../src/protocol/KnoxValidators.js";
+import { validateMissionDeclined, validateMission } from "../src/protocol/KnoxValidators.js";
 
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -71,7 +71,7 @@ test("posts telemetry with Network association and connector token", async () =>
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
 
-test("pulls and acknowledges the strict Drop Box test mission", async () => {
+test("pulls and acknowledges an open mission", async () => {
   const actions: any[] = [];
   const server = createServer((request, response) => {
     let body = ""; request.setEncoding("utf8"); request.on("data", (chunk) => { body += chunk; });
@@ -79,26 +79,18 @@ test("pulls and acknowledges the strict Drop Box test mission", async () => {
       const value = JSON.parse(body); actions.push(value);
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify(value.action === "pull"
-        ? { ok: true, protocolVersion: 1, mission: { protocolVersion: 1, missionId: "test_005", missionVersion: 1, title: "Supply Requisition", status: "available", objective: { type: "deliver_items", text: "Deliver the requested medical supplies to the shared Knox Drop Box.", requirements: [{ itemType: "Base.Bandage", quantity: 3 }, { itemType: "Base.RippedSheets", quantity: 2 }], deliveryArea: null }, reward: { type: "xp", rewardId: "test_reward_xp_002", perk: "Woodwork", amount: 50 }, testFixture: { provisionRequirementsOnAccept: true } } }
+        ? { ok: true, protocolVersion: 1, mission: { protocolVersion: 1, missionId: "knox_transport_check_1", missionVersion: 1, title: "Transport Check", summary: "Checks transport.", objectives: [] } }
         : { ok: true, protocolVersion: 1, missionId: value.missionId }));
     });
   });
   try {
     const missionSyncEndpoint = await listen(server);
     const client = new KnoxApiClient({ ...DEFAULT_CONFIG, missionSyncEndpoint, networkId: "network-1", connectorToken: "secret" });
-    assert.equal((await client.pullMission()).mission?.missionId, "test_005");
-    await client.acknowledgeMissionQueued("test_005");
+    assert.equal((await client.pullMission()).mission?.missionId, "knox_transport_check_1");
+    await client.acknowledgeMissionQueued("knox_transport_check_1");
     assert.deepEqual(actions.map((value) => value.action), ["pull", "queued"]);
     assert.equal(actions[0].networkId, "network-1");
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
-});
-
-test('validates a bounded dynamic delivery-area fixture', () => {
-  const mission = { protocolVersion: 1, missionId: 'test_006', missionVersion: 1, title: 'Nearby Localized Supply Drop', status: 'available',
-    objective: { type: 'deliver_items', text: 'Deliver medical supplies inside the nearby test area.', requirements: [{ itemType: 'Base.Bandage', quantity: 3 }, { itemType: 'Base.RippedSheets', quantity: 2 }], deliveryArea: { type: 'radius', x: 100, y: 200, z: 0, radius: 20, name: 'Nearby Test Delivery Area' } },
-    reward: { type: 'xp', rewardId: 'test_reward_xp_003', perk: 'Woodwork', amount: 50 }, testFixture: { provisionRequirementsOnAccept: true, kind: 'nearby' } };
-  assert.equal(validateTestMission(mission).missionId, 'test_006');
-  assert.throws(() => validateTestMission({ ...mission, objective: { ...mission.objective, deliveryArea: { ...mission.objective.deliveryArea, radius: 999 } } }), /invalid test mission/);
 });
 
 test('validates a dynamic verified-location recon without changing mechanics', () => {
@@ -110,9 +102,9 @@ test('validates a dynamic verified-location recon without changing mechanics', (
     navigationContext: { distanceTiles: 1400, direction: 'NW', reference: 'party' },
     chain: { chainId: 'knox_relay_v02', stage: 1, requiresCompleted: [] },
     narrative: { briefing: 'Conditions unknown.', shortObjective: 'Reach the area.', arrivalMessage: 'Signal acquired.', completionMessage: 'Confirmed.' } };
-  assert.equal(validateTestMission(mission).missionId, mission.missionId);
-  assert.throws(() => validateTestMission({ ...mission, objective: { ...mission.objective, area: { ...mission.objective.area, x: 'AI says here' } } }), /invalid curated visit mission/);
-  assert.throws(() => validateTestMission({ ...mission, reward: { ...mission.reward, amount: 999 } }), /invalid curated visit mission/);
+  assert.equal(validateMission(mission).missionId, mission.missionId);
+  assert.throws(() => validateMission({ ...mission, objective: { ...mission.objective, area: { ...mission.objective.area, x: 'AI says here' } } }), /invalid curated visit mission/);
+  assert.throws(() => validateMission({ ...mission, reward: { ...mission.reward, amount: 999 } }), /invalid curated visit mission/);
 });
 
 test('keeps legacy curated visit payloads compatible without navigation context', () => {
@@ -123,7 +115,7 @@ test('keeps legacy curated visit payloads compatible without navigation context'
     location: { locationId: 'muldraugh_residential_spawn', name: 'Muldraugh residential spawn area', town: 'Muldraugh' },
     chain: { chainId: 'knox_relay_v0', stage: 1, requiresCompleted: [] },
     narrative: { briefing: 'Conditions unknown.', shortObjective: 'Reach the area.', arrivalMessage: 'Signal acquired.', completionMessage: 'Confirmed.' } };
-  assert.equal(validateTestMission(mission).missionId, mission.missionId);
+  assert.equal(validateMission(mission).missionId, mission.missionId);
 });
 
 test('validates the durable shared decline event', () => {

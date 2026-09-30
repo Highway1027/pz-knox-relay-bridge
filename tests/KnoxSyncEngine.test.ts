@@ -171,19 +171,19 @@ test("coalesces stale telemetry by sending only the newest overwritten snapshot"
 
 test("queues one validated mission file and does not recreate an archived mission", async () => {
   const api = new FakeApi();
-  api.mission = { protocolVersion: 1, missionId: "test_001", missionVersion: 1, title: "Connector Test Mission", status: "active", objective: { type: "test", text: "Verify Web to Project Zomboid mission transport." }, reward: null, testFixture: null };
+  api.mission = { protocolVersion: 1, missionId: "knox_transport_check_1", missionVersion: 1, title: "Transport Check", summary: "Checks transport.", objectives: [] } as unknown as ConnectorMission;
   const { exchangeDirectory, paths, engine } = await fixture(api);
   try {
     const config = { ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1, missionSyncEndpoint: "https://example.test", missionPollIntervalMs: 1 };
     const missionEngine = new KnoxSyncEngine(config, new KnoxLogger(), api);
     await missionEngine.pollOnce();
-    const pending = path.join(paths.bridgePending, "mission_test_001.json");
-    assert.equal(JSON.parse(await readFile(pending, "utf8")).missionId, "test_001");
+    const pending = path.join(paths.bridgePending, "mission_knox_transport_check_1.json");
+    assert.equal(JSON.parse(await readFile(pending, "utf8")).missionId, "knox_transport_check_1");
     assert.equal(api.missionAcks, 1);
     await (await import("../src/files/KnoxQueue.js")).moveQueueFile(pending, paths.bridgeProcessed);
     await new Promise((resolve) => setTimeout(resolve, 2));
     await missionEngine.pollOnce();
-    await readFile(path.join(paths.bridgeProcessed, "mission_test_001.json"), "utf8");
+    await readFile(path.join(paths.bridgeProcessed, "mission_knox_transport_check_1.json"), "utf8");
     assert.equal(api.missionAcks, 2);
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });
@@ -192,14 +192,14 @@ test("archives a locally queued mission after the PZ acknowledgement", async () 
   const api = new FakeApi();
   const { exchangeDirectory, paths } = await fixture(api);
   try {
-    const missionPath = path.join(paths.bridgePending, "mission_test_001.json");
-    await writeFile(missionPath, JSON.stringify({ protocolVersion: 1, missionId: "test_001", missionVersion: 1, title: "Connector Test Mission", status: "active", objective: { type: "test", text: "Verify Web to Project Zomboid mission transport." }, reward: null, testFixture: null }));
+    const missionPath = path.join(paths.bridgePending, "mission_knox_transport_check_1.json");
+    await writeFile(missionPath, JSON.stringify({ protocolVersion: 1, missionId: "knox_transport_check_1", missionVersion: 1, title: "Transport Check", summary: "Checks transport.", objectives: [] }));
     const ackPath = path.join(paths.gamePending, "evt_mission_ack.json");
-    await writeFile(ackPath, JSON.stringify({ protocolVersion: 1, messageId: "evt_mission_ack", type: "mission_received_ack", createdAt: new Date().toISOString(), payload: { missionId: "test_001" } }));
+    await writeFile(ackPath, JSON.stringify({ protocolVersion: 1, messageId: "evt_mission_ack", type: "mission_received_ack", createdAt: new Date().toISOString(), payload: { missionId: "knox_transport_check_1" } }));
     await new Promise((resolve) => setTimeout(resolve, 5));
     const engine = new KnoxSyncEngine({ ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1 }, new KnoxLogger(), api);
     await engine.pollOnce();
-    await readFile(path.join(paths.bridgeProcessed, "mission_test_001.json"), "utf8");
+    await readFile(path.join(paths.bridgeProcessed, "mission_knox_transport_check_1.json"), "utf8");
     await readFile(path.join(paths.gameProcessed, "evt_mission_ack.json"), "utf8");
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });

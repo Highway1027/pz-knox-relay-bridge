@@ -48,19 +48,18 @@ The Bridge validates exact fields, adds configured `networkId` and `connectorVer
 
 Unknown fields, versions/types, malformed dates, empty player arrays, invalid names, and non-finite/out-of-range coordinates fail closed.
 
-## Test mission delivery
+## Mission delivery
 
-The Bridge posts authenticated `pull` requests to `knoxMissionSync`. A pending `missions/test_001` document is mapped to exactly:
+The Bridge posts authenticated `pull` requests to `knoxMissionSync`. The backend answers with one pending mission or `null`. After validation, the Bridge atomically writes `bridge-to-game/pending/mission_<missionId>.json` and tells the backend it is locally queued. Existing pending or processed files suppress recreation. PZ writes a strict `mission_received_ack` into `game-to-bridge/pending`; the Bridge then archives both files.
 
-```json
-{"protocolVersion":1,"missionId":"test_001","missionVersion":1,"title":"Connector Test Mission","status":"active","objective":{"type":"test","text":"Verify Web to Project Zomboid mission transport."}}
-```
+Accepted mission ids:
 
-After strict validation, the Bridge atomically writes `bridge-to-game/pending/mission_test_001.json` and tells the backend it is locally queued. Existing pending or processed files suppress recreation. PZ writes a strict `mission_received_ack` into `game-to-bridge/pending`; the Bridge then archives both files. This phase supports only `test_001`.
+- `mission_v0_*` (curated) and `mission_v02_recon_*` (dynamic recon): `visit_area` missions with exact-key checks (`validateMission` in `src/protocol/KnoxValidators.ts`). Always `missionVersion` 1.
+- `knox_*` (open missions): envelope checks only, see below.
 
-`missionId` identifies the logical mission and `missionVersion` identifies its payload
-revision. Phase 5A accepts version 1 only; later update delivery can therefore distinguish
-a newer revision from a duplicate without changing Phase 4 deduplication.
+The Phase 4–6B test missions `test_001`–`test_007` were retired in Bridge 0.2.5 and are rejected like any unknown id.
+
+`missionId` identifies the logical mission and `missionVersion` identifies its payload revision, so a newer revision can be told apart from a duplicate.
 
 ## Open missions (`knox_` ids, Bridge 0.2.4+)
 

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionPullResponse, validateMissionReceivedAcknowledgement, validateTestMission } from "../src/protocol/KnoxValidators.js";
+import { validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionPullResponse, validateMissionReceivedAcknowledgement, validateMission } from "../src/protocol/KnoxValidators.js";
 
 const telemetry = (payloadExtra: Record<string, unknown> = {}) => ({
   protocolVersion: 1, messageId: "evt_123", type: "game_telemetry", createdAt: "2026-09-27T12:00:00Z",
@@ -48,21 +48,21 @@ const openMission = {
 };
 
 test("accepts an open knox_ mission by envelope and leaves its content alone", () => {
-  assert.deepEqual(validateTestMission(openMission), openMission);
+  assert.deepEqual(validateMission(openMission), openMission);
   assert.doesNotThrow(() => validateMissionPullResponse({ ok: true, protocolVersion: 1, mission: openMission }));
 });
 
 test("rejects open missions with a bad envelope", () => {
-  assert.throws(() => validateTestMission({ ...openMission, missionId: "knox_BAD" }));
-  assert.throws(() => validateTestMission({ ...openMission, missionVersion: 0 }), /missionVersion/);
-  assert.throws(() => validateTestMission({ ...openMission, title: "" }), /title/);
-  assert.throws(() => validateTestMission({ ...openMission, protocolVersion: 2 }), /protocolVersion/);
-  assert.throws(() => validateTestMission({ ...openMission, summary: "x".repeat(40000) }), /too (long|large)/);
+  assert.throws(() => validateMission({ ...openMission, missionId: "knox_BAD" }));
+  assert.throws(() => validateMission({ ...openMission, missionVersion: 0 }), /missionVersion/);
+  assert.throws(() => validateMission({ ...openMission, title: "" }), /title/);
+  assert.throws(() => validateMission({ ...openMission, protocolVersion: 2 }), /protocolVersion/);
+  assert.throws(() => validateMission({ ...openMission, summary: "x".repeat(40000) }), /too (long|large)/);
 });
 
-test("still rejects unknown non-knox mission ids and changed curated missions", () => {
-  assert.throws(() => validateTestMission({ ...openMission, missionId: "other_mod_1" }));
-  assert.throws(() => validateTestMission({ protocolVersion: 1, missionId: "test_001", missionVersion: 1, title: "Changed", status: "active", objective: { type: "test", text: "x" }, reward: null, testFixture: null }), /invalid test mission/);
+test("rejects unknown and retired mission ids", () => {
+  assert.throws(() => validateMission({ ...openMission, missionId: "other_mod_1" }));
+  assert.throws(() => validateMission({ protocolVersion: 1, missionId: "test_001", missionVersion: 1, title: "Connector Test Mission", status: "active", objective: { type: "test", text: "Verify Web to Project Zomboid mission transport." }, reward: null, testFixture: null }), /invalid mission ID/);
 });
 
 const event = (type: string, payload: Record<string, unknown>) => ({ protocolVersion: 1, messageId: "evt_9", type, createdAt: "2026-09-27T12:00:00Z", payload });

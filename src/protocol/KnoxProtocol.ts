@@ -69,18 +69,8 @@ export interface KnoxTelemetryResponse {
   messageId: string;
 }
 
-export type MissionId = "test_001" | "test_002" | "test_003" | "test_004" | "test_005" | "test_006" | "test_007"
-  | "mission_v0_muldraugh_checkin" | "mission_v0_fallas_recon" | "mission_v0_echo_recon"
+export type MissionId = "mission_v0_muldraugh_checkin" | "mission_v0_fallas_recon" | "mission_v0_echo_recon"
   | "mission_v0_march_recon" | "mission_v0_westpoint_recon" | `mission_v02_${string}` | `knox_${string}`;
-
-export interface DeliveryArea {
-  type: "radius";
-  x: number;
-  y: number;
-  z: number;
-  radius: 20;
-  name: string;
-}
 
 export interface VisitArea {
   type: "radius";
@@ -91,13 +81,7 @@ export interface VisitArea {
   name: string;
 }
 
-export type MissionReward =
-  | { type: "item"; rewardId: "test_reward_item_001"; itemFullType: "Base.Bandage"; quantity: 1 }
-  | { type: "xp"; rewardId: "test_reward_xp_001"; perk: "Woodwork"; amount: 100 }
-  | { type: "xp"; rewardId: "test_reward_xp_002"; perk: "Woodwork"; amount: 50 }
-  | { type: "xp"; rewardId: "test_reward_xp_003" | "test_reward_xp_004"; perk: "Woodwork"; amount: 50 }
-  | { type: "xp"; rewardId: `reward_mission_v02_${string}`; perk: string; amount: number }
-  | { type: "world_xp_multiplier"; rewardId: "test_reward_world_xp_001"; delta: 0.1 };
+export type MissionReward = { type: "xp"; rewardId: `reward_mission_v0${string}`; perk: string; amount: number };
 
 export interface ConnectorMission {
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;
@@ -105,12 +89,9 @@ export interface ConnectorMission {
   missionVersion: 1;
   title: string;
   status: "available" | "active";
-  objective:
-    | { type: "test"; text: string }
-    | { type: "deliver_items"; text: string; requirements: Array<{ itemType: string; quantity: number }>; deliveryArea: DeliveryArea | null }
-    | { type: "visit_area"; text: string; area: VisitArea };
+  objective: { type: "visit_area"; text: string; area: VisitArea };
   reward: MissionReward | null;
-  testFixture: { provisionRequirementsOnAccept: true; kind?: "nearby" | "distant" } | null;
+  testFixture: null;
   location?: { locationId: string; name: string; town: string; navigation?: Record<string, unknown> };
   navigationContext?: { distanceTiles: number; direction: string; reference: string } | null;
   chain?: { chainId: string; stage: number; requiresCompleted: string[] };

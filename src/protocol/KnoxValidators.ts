@@ -69,87 +69,46 @@ export function validateTelemetryResponse(value: unknown, messageId: string): Kn
   return response as unknown as KnoxTelemetryResponse;
 }
 
-const MISSIONS = {
-  test_001: { title: "Connector Test Mission", status: "active", objective: { type: "test", text: "Verify Web to Project Zomboid mission transport." }, reward: null, testFixture: null },
-  test_002: { title: "Emergency Field Dressing", status: "active", objective: { type: "test", text: "Confirm one shared item reward reaches every known survivor." }, reward: { type: "item", rewardId: "test_reward_item_001", itemFullType: "Base.Bandage", quantity: 1 }, testFixture: null },
-  test_003: { title: "Carpentry Training Broadcast", status: "active", objective: { type: "test", text: "Confirm one shared mission grants each survivor 100 Woodwork XP." }, reward: { type: "xp", rewardId: "test_reward_xp_001", perk: "Woodwork", amount: 100 }, testFixture: null },
-  test_004: { title: "Network Learning Doctrine", status: "active", objective: { type: "test", text: "Confirm one shared world reward increases the global XP multiplier by 0.10." }, reward: { type: "world_xp_multiplier", rewardId: "test_reward_world_xp_001", delta: 0.1 }, testFixture: null },
-  test_005: { title: "Supply Requisition", status: "available", objective: { type: "deliver_items", text: "Deliver the requested medical supplies to the shared Knox Drop Box.", requirements: [{ itemType: "Base.Bandage", quantity: 3 }, { itemType: "Base.RippedSheets", quantity: 2 }], deliveryArea: null }, reward: { type: "xp", rewardId: "test_reward_xp_002", perk: "Woodwork", amount: 50 }, testFixture: { provisionRequirementsOnAccept: true } },
-  test_006: { title: "Nearby Localized Supply Drop", status: "available", objective: { type: "deliver_items", text: "Deliver medical supplies inside the nearby test area.", requirements: [{ itemType: "Base.Bandage", quantity: 3 }, { itemType: "Base.RippedSheets", quantity: 2 }] }, reward: { type: "xp", rewardId: "test_reward_xp_003", perk: "Woodwork", amount: 50 }, testFixture: { provisionRequirementsOnAccept: true, kind: "nearby" } },
-  test_007: { title: "Distant Localized Supply Drop", status: "available", objective: { type: "deliver_items", text: "Deliver medical supplies inside the distant test area.", requirements: [{ itemType: "Base.Bandage", quantity: 3 }, { itemType: "Base.RippedSheets", quantity: 2 }] }, reward: { type: "xp", rewardId: "test_reward_xp_004", perk: "Woodwork", amount: 50 }, testFixture: { provisionRequirementsOnAccept: true, kind: "distant" } },
-} as const;
-
 function isMissionId(value: unknown): value is MissionId {
-  return typeof value === "string" && (Object.prototype.hasOwnProperty.call(MISSIONS, value) || /^mission_v0[2]?_[a-z0-9_]{1,96}$/.test(value) || ENVELOPE_MISSION_ID.test(value));
+  return typeof value === "string" && (/^mission_v0[2]?_[a-z0-9_]{1,96}$/.test(value) || ENVELOPE_MISSION_ID.test(value));
 }
 
 function isEnvelopeMissionId(value: unknown): boolean {
   return typeof value === "string" && ENVELOPE_MISSION_ID.test(value);
 }
 
-function exactJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function validAreaObjective(value: unknown, expected: (typeof MISSIONS)["test_006" | "test_007"]): boolean {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const objective = value as Record<string, unknown>;
-  if (!exactKeys(objective, ["type", "text", "requirements", "deliveryArea"]) ||
-      objective.type !== expected.objective.type || objective.text !== expected.objective.text ||
-      !exactJson(objective.requirements, expected.objective.requirements)) return false;
-  const area = objective.deliveryArea as Record<string, unknown>;
-  if (!area || typeof area !== "object" || Array.isArray(area) ||
-      !exactKeys(area, ["type", "x", "y", "z", "radius", "name"])) return false;
-  return area.type === "radius" && area.radius === 20 &&
-    [area.x, area.y, area.z].every((coordinate) => typeof coordinate === "number" && Number.isInteger(coordinate) && coordinate >= 0 && coordinate <= 1000000) &&
-    typeof area.name === "string" && area.name.length >= 1 && area.name.length <= 96;
-}
-
-export function validateTestMission(value: unknown): ConnectorMission {
+export function validateMission(value: unknown): ConnectorMission {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("mission must be an object");
   const mission = value as Record<string, unknown>;
   // Open missions from the mission engine: envelope only, content is validated by the Connector.
   if (isEnvelopeMissionId(mission.missionId)) return validateEnvelopeMission(mission) as unknown as ConnectorMission;
-  const curated = typeof mission.missionId === 'string' && (mission.missionId.startsWith('mission_v0_') || mission.missionId.startsWith('mission_v02_'));
+  if (!isMissionId(mission.missionId)) throw new Error("invalid mission ID");
   const curatedKeys = ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture", "location", "chain", "narrative"];
-  if (!(curated ? exactKeys(mission, curatedKeys) || exactKeys(mission, [...curatedKeys, "navigationContext"])
-    : exactKeys(mission, ["protocolVersion", "missionId", "missionVersion", "title", "status", "objective", "reward", "testFixture"]))) throw new Error("unexpected mission fields");
-  if (!isMissionId(mission.missionId)) throw new Error("invalid test mission ID");
-  if (curated) {
-    const objective = mission.objective as Record<string, unknown>;
-    const area = objective?.area as Record<string, unknown>;
-    const location = mission.location as Record<string, unknown>;
-    const chain = mission.chain as Record<string, unknown>;
-    const narrative = mission.narrative as Record<string, unknown>;
-    const navigation = mission.navigationContext as Record<string, unknown> | null;
-    const reward = mission.reward as Record<string, unknown>;
-    const dynamic = typeof mission.missionId === 'string' && mission.missionId.startsWith('mission_v02_recon_');
-    const dynamicLocationId = dynamic ? mission.missionId.slice('mission_v02_recon_'.length) : null;
-    if (mission.protocolVersion !== 1 || mission.missionVersion !== 1 || mission.status !== 'available' || mission.testFixture !== null ||
-        !objective || objective.type !== 'visit_area' || typeof objective.text !== 'string' || !area || area.type !== 'radius' ||
-        ![area.x, area.y, area.z, area.radius].every((entry) => typeof entry === 'number' && Number.isInteger(entry)) ||
-        Number(area.x) < 0 || Number(area.x) > 1000000 || Number(area.y) < 0 || Number(area.y) > 1000000 ||
-        Number(area.z) < 0 || Number(area.z) > 32 || Number(area.radius) < 1 || Number(area.radius) > 500 ||
-        typeof area.name !== 'string' || area.name.length < 1 || area.name.length > 128 || !location ||
-        typeof location.locationId !== 'string' || typeof location.town !== 'string' || typeof location.name !== 'string' ||
-        (dynamic && (location.locationId !== dynamicLocationId || !reward || reward.type !== 'xp' ||
-          reward.rewardId !== `reward_${mission.missionId}` || reward.perk !== 'Woodwork' || reward.amount !== 75)) ||
-        !chain || typeof chain.chainId !== 'string' || !Number.isInteger(chain.stage) || !Array.isArray(chain.requiresCompleted) ||
-        (navigation != null && (typeof navigation.distanceTiles !== 'number' || !Number.isInteger(navigation.distanceTiles) || navigation.distanceTiles < 0 ||
-          !['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'here'].includes(String(navigation.direction)) || typeof navigation.reference !== 'string')) ||
-        !narrative || !['briefing', 'shortObjective', 'arrivalMessage', 'completionMessage'].every((key) => typeof narrative[key] === 'string'))
-      throw new Error('invalid curated visit mission');
-    return mission as unknown as ConnectorMission;
-  }
-  const expected = MISSIONS[mission.missionId as keyof typeof MISSIONS];
-  const objectiveValid = mission.missionId === "test_006" || mission.missionId === "test_007"
-    ? validAreaObjective(mission.objective, MISSIONS[mission.missionId])
-    : exactJson(mission.objective, expected.objective);
-  if (mission.protocolVersion !== 1 || mission.missionVersion !== 1 || mission.title !== expected.title || mission.status !== expected.status ||
-      !objectiveValid || !exactJson(mission.reward, expected.reward) ||
-      !exactJson(mission.testFixture, expected.testFixture)) {
-    throw new Error("invalid test mission");
-  }
+  if (!(exactKeys(mission, curatedKeys) || exactKeys(mission, [...curatedKeys, "navigationContext"]))) throw new Error("unexpected mission fields");
+  // Curated (mission_v0_) and dynamic recon (mission_v02_recon_) visit missions.
+  const objective = mission.objective as Record<string, unknown>;
+  const area = objective?.area as Record<string, unknown>;
+  const location = mission.location as Record<string, unknown>;
+  const chain = mission.chain as Record<string, unknown>;
+  const narrative = mission.narrative as Record<string, unknown>;
+  const navigation = mission.navigationContext as Record<string, unknown> | null;
+  const reward = mission.reward as Record<string, unknown>;
+  const dynamic = typeof mission.missionId === 'string' && mission.missionId.startsWith('mission_v02_recon_');
+  const dynamicLocationId = dynamic ? mission.missionId.slice('mission_v02_recon_'.length) : null;
+  if (mission.protocolVersion !== 1 || mission.missionVersion !== 1 || mission.status !== 'available' || mission.testFixture !== null ||
+      !objective || objective.type !== 'visit_area' || typeof objective.text !== 'string' || !area || area.type !== 'radius' ||
+      ![area.x, area.y, area.z, area.radius].every((entry) => typeof entry === 'number' && Number.isInteger(entry)) ||
+      Number(area.x) < 0 || Number(area.x) > 1000000 || Number(area.y) < 0 || Number(area.y) > 1000000 ||
+      Number(area.z) < 0 || Number(area.z) > 32 || Number(area.radius) < 1 || Number(area.radius) > 500 ||
+      typeof area.name !== 'string' || area.name.length < 1 || area.name.length > 128 || !location ||
+      typeof location.locationId !== 'string' || typeof location.town !== 'string' || typeof location.name !== 'string' ||
+      (dynamic && (location.locationId !== dynamicLocationId || !reward || reward.type !== 'xp' ||
+        reward.rewardId !== `reward_${mission.missionId}` || reward.perk !== 'Woodwork' || reward.amount !== 75)) ||
+      !chain || typeof chain.chainId !== 'string' || !Number.isInteger(chain.stage) || !Array.isArray(chain.requiresCompleted) ||
+      (navigation != null && (typeof navigation.distanceTiles !== 'number' || !Number.isInteger(navigation.distanceTiles) || navigation.distanceTiles < 0 ||
+        !['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW', 'here'].includes(String(navigation.direction)) || typeof navigation.reference !== 'string')) ||
+      !narrative || !['briefing', 'shortObjective', 'arrivalMessage', 'completionMessage'].every((key) => typeof narrative[key] === 'string'))
+    throw new Error('invalid curated visit mission');
   return mission as unknown as ConnectorMission;
 }
 
@@ -157,7 +116,7 @@ export function validateMissionPullResponse(value: unknown): MissionPullResponse
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
   const response = value as Record<string, unknown>;
   if (!exactKeys(response, ["ok", "protocolVersion", "mission"]) || response.ok !== true || response.protocolVersion !== 1) throw new Error("invalid mission pull response");
-  if (response.mission !== null) validateTestMission(response.mission);
+  if (response.mission !== null) validateMission(response.mission);
   return response as unknown as MissionPullResponse;
 }
 
@@ -179,7 +138,7 @@ export function validateMissionReceivedAcknowledgement(value: unknown): MissionR
   return message as unknown as MissionReceivedAcknowledgement;
 }
 
-// Curated and test missions are always version 1; open missions may be revised.
+// Curated missions are always version 1; open missions may be revised.
 function validMissionVersion(missionId: unknown, version: unknown): boolean {
   if (isEnvelopeMissionId(missionId)) return Number.isInteger(version) && Number(version) >= 1 && Number(version) <= 100000;
   return version === 1;
