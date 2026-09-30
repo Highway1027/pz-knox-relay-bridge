@@ -204,6 +204,32 @@ test("archives a locally queued mission after the PZ acknowledgement", async () 
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });
 
+test("keeps an index of waiting knox_ mission files for the Connector", async () => {
+  const api = new FakeApi();
+  const { exchangeDirectory, paths } = await fixture(api);
+  try {
+    const indexPath = path.join(paths.bridgePending, "knox_missions.json");
+    const mission = (id: string) => JSON.stringify({ protocolVersion: 1, missionId: id, missionVersion: 1, title: "Index Check" });
+    await writeFile(path.join(paths.bridgePending, "mission_knox_b_1.json"), mission("knox_b_1"));
+    await writeFile(path.join(paths.bridgePending, "mission_knox_a_1.json"), mission("knox_a_1"));
+    await writeFile(path.join(paths.bridgePending, "mission_mission_v0_fallas_recon.json"), "{}");
+    await writeFile(path.join(paths.bridgePending, "ack_evt_1.json"), "{}");
+    const engine = new KnoxSyncEngine({ ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1 }, new KnoxLogger(), api);
+    await engine.pollOnce();
+    assert.deepEqual(JSON.parse(await readFile(indexPath, "utf8")), { protocolVersion: 1, missionIds: ["knox_a_1", "knox_b_1"] });
+
+    const ackPath = path.join(paths.gamePending, "evt_index_ack.json");
+    await writeFile(ackPath, JSON.stringify({ protocolVersion: 1, messageId: "evt_index_ack", type: "mission_received_ack", createdAt: new Date().toISOString(), payload: { missionId: "knox_a_1" } }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await engine.pollOnce();
+    assert.deepEqual(JSON.parse(await readFile(indexPath, "utf8")).missionIds, ["knox_b_1"]);
+
+    await rm(indexPath);
+    await engine.pollOnce();
+    assert.deepEqual(JSON.parse(await readFile(indexPath, "utf8")).missionIds, ["knox_b_1"]);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
 test("mission backend outage does not throw or disturb local queue processing", async () => {
   const api = new FakeApi(); api.missionShouldFail = true;
   const { exchangeDirectory, paths } = await fixture(api);

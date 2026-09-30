@@ -64,3 +64,5 @@ The Phase 4–6B test missions `test_001`–`test_007` were retired in Bridge 0.
 ## Open missions (`knox_` ids, Bridge 0.2.4+)
 
 Missions whose id matches `knox_[a-z0-9_]{1,96}` come from the mission engine and use the open mission format. The Bridge checks the envelope only: `protocolVersion` 1, the id, an integer `missionVersion` (1–100,000), a `title` of 1–120 characters, and plain bounded JSON (at most 32 KB, depth 10). The Connector validates and interprets the content. Their `mission_completed` and `mission_declined` events may carry any `missionVersion` from 1 and an `objectiveType` of lowercase letters and underscores. All older mission ids keep their exact checks.
+
+**Index (Bridge 0.2.5+).** PZ Lua cannot list a folder, so the Bridge keeps `bridge-to-game/pending/knox_missions.json` up to date: `{ "protocolVersion": 1, "missionIds": ["knox_...", ...] }`, sorted, at most 64 ids, one per `mission_knox_*.json` file waiting in that folder. It is rewritten atomically after each poll when the list changed or the file is missing. The Connector (builds after 0.14.1) reads the index, then each listed mission file.

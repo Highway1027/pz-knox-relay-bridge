@@ -1,7 +1,7 @@
 // src/sync/KnoxSyncEngine.ts
 // v7 - 26-09-2026 - Stop desktop polling cleanly between transport stages
 
-import { access } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import path from "node:path";
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
@@ -9,6 +9,10 @@ import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
 import { KNOX_PROTOCOL_VERSION, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
 import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement } from "../protocol/KnoxValidators.js";
+
+export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
+const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
+const KNOX_MISSION_INDEX_MAX = 64;
 
 async function exists(filePath: string): Promise<boolean> {
   try {
@@ -31,6 +35,7 @@ export class KnoxSyncEngine {
   private nextMissionPollAt = 0;
   private missionRetryAttempts = 0;
   private missionBackendOnline: boolean | undefined;
+  private lastKnoxMissionIndex?: string;
 
   constructor(
     private readonly config: KnoxBridgeConfig,
@@ -55,6 +60,8 @@ export class KnoxSyncEngine {
       await this.processTelemetrySnapshot();
       if (!this.running) return;
       await this.pollMission();
+      if (!this.running) return;
+      await this.refreshKnoxMissionIndex();
     } finally {
       this.polling = false;
     }
@@ -204,6 +211,21 @@ export class KnoxSyncEngine {
       this.backendOnline = false;
       this.logger.error(`${message.messageId} latest telemetry retained for retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // PZ Lua cannot list a folder, so the Connector learns which knox_ mission files are waiting
+  // from this index. Rewritten only when the list changes (or the file went missing).
+  private async refreshKnoxMissionIndex(): Promise<void> {
+    const indexPath = path.join(this.paths.bridgePending, KNOX_MISSION_INDEX_FILE);
+    const missionIds = (await readdir(this.paths.bridgePending))
+      .map((name) => KNOX_MISSION_FILE.exec(name)?.[1])
+      .filter((id): id is string => id !== undefined)
+      .sort()
+      .slice(0, KNOX_MISSION_INDEX_MAX);
+    const key = missionIds.join(",");
+    if (key === this.lastKnoxMissionIndex && await exists(indexPath)) return;
+    await atomicWriteJson(indexPath, { protocolVersion: KNOX_PROTOCOL_VERSION, missionIds });
+    this.lastKnoxMissionIndex = key;
   }
 
   private async pollMission(): Promise<void> {
