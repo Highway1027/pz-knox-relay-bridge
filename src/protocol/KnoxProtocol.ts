@@ -123,7 +123,8 @@ export interface MissionCompletedMessage {
   messageId: string;
   type: "mission_completed";
   createdAt: string;
-  payload: { missionId: MissionId; missionVersion: number; objectiveType: string; completedBy: string };
+  // saveId: the save that completed it (Connector, once the save is linked; MISSION_API 13.9).
+  payload: { missionId: MissionId; missionVersion: number; objectiveType: string; completedBy: string; saveId?: string };
 }
 
 export interface MissionDeclinedMessage {
@@ -131,5 +132,11 @@ export interface MissionDeclinedMessage {
   messageId: string;
   type: "mission_declined";
   createdAt: string;
-  payload: { missionId: MissionId; missionVersion: number; declinedBy: string };
+  payload: { missionId: MissionId; missionVersion: number; declinedBy: string; saveId?: string };
+}
+
+// Added by the Bridge to every mission file it writes, so the Connector can link a save to one network.
+export interface MissionFileIdentity {
+  networkId: string;
+  connectionName?: string;
 }

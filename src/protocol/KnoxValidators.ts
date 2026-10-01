@@ -138,6 +138,15 @@ export function validateMissionReceivedAcknowledgement(value: unknown): MissionR
   return message as unknown as MissionReceivedAcknowledgement;
 }
 
+// Save identity from the Connector (MISSION_API 13.9); the backend checks the same pattern.
+export const SAVE_ID_PATTERN = /^save_[a-z0-9]{1,40}$/;
+
+// Exact payload keys, optionally plus a valid saveId.
+function payloadKeysWithSave(payload: Record<string, unknown>, keys: string[]): boolean {
+  if (exactKeys(payload, keys)) return true;
+  return exactKeys(payload, [...keys, "saveId"]) && typeof payload.saveId === "string" && SAVE_ID_PATTERN.test(payload.saveId);
+}
+
 // Curated missions are always version 1; open missions may be revised.
 function validMissionVersion(missionId: unknown, version: unknown): boolean {
   if (isEnvelopeMissionId(missionId)) return Number.isInteger(version) && Number(version) >= 1 && Number(version) <= 100000;
@@ -151,7 +160,7 @@ export function validateMissionCompleted(value: unknown): MissionCompletedMessag
   if (!exactKeys(message, ['protocolVersion', 'messageId', 'type', 'createdAt', 'payload']) || message.protocolVersion !== 1 ||
       message.type !== 'mission_completed' || typeof message.messageId !== 'string' || !MESSAGE_ID_PATTERN.test(message.messageId) ||
       typeof message.createdAt !== 'string' || Number.isNaN(Date.parse(message.createdAt)) || !payload || Array.isArray(payload) ||
-      !exactKeys(payload, ['missionId', 'missionVersion', 'objectiveType', 'completedBy']) || !isMissionId(payload.missionId) ||
+      !payloadKeysWithSave(payload, ['missionId', 'missionVersion', 'objectiveType', 'completedBy']) || !isMissionId(payload.missionId) ||
       !validMissionVersion(payload.missionId, payload.missionVersion) || typeof payload.completedBy !== 'string' ||
       (isEnvelopeMissionId(payload.missionId) ? typeof payload.objectiveType !== 'string' || !/^[a-z_]{1,40}$/.test(payload.objectiveType)
         : payload.objectiveType !== 'visit_area'))
@@ -166,7 +175,7 @@ export function validateMissionDeclined(value: unknown): MissionDeclinedMessage 
   if (!exactKeys(message, ['protocolVersion', 'messageId', 'type', 'createdAt', 'payload']) || message.protocolVersion !== 1 ||
       message.type !== 'mission_declined' || typeof message.messageId !== 'string' || !MESSAGE_ID_PATTERN.test(message.messageId) ||
       typeof message.createdAt !== 'string' || Number.isNaN(Date.parse(message.createdAt)) || !payload || Array.isArray(payload) ||
-      !exactKeys(payload, ['missionId', 'missionVersion', 'declinedBy']) || !isMissionId(payload.missionId) ||
+      !payloadKeysWithSave(payload, ['missionId', 'missionVersion', 'declinedBy']) || !isMissionId(payload.missionId) ||
       !validMissionVersion(payload.missionId, payload.missionVersion) || typeof payload.declinedBy !== 'string' || payload.declinedBy.length < 1)
     throw new Error('invalid mission decline');
   return message as unknown as MissionDeclinedMessage;

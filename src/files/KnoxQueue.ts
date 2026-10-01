@@ -1,7 +1,7 @@
 // src/files/KnoxQueue.ts
 // v1 - 23-09-2026 - Implement durable directory queue reads, moves, and atomic writes
 
-import { mkdir, open, readdir, rename, stat } from "node:fs/promises";
+import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 
 export interface KnoxQueuePaths {
@@ -53,16 +53,50 @@ export async function readJsonFile(filePath: string): Promise<unknown> {
   }
 }
 
-export async function atomicWriteJson(filePath: string, value: unknown): Promise<void> {
-  const temporaryPath = `${filePath}.${process.pid}.tmp`;
-  const file = await open(temporaryPath, "wx");
+let temporaryCounter = 0;
+// Windows refuses to replace a file another program has open (PZ reading the index or a mission file).
+const LOCKED_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_ATTEMPTS = 6;
+
+// The reader sees the old file or the complete new one, never a half-written file: the content goes to a
+// temporary name (never *.json, so neither PZ nor the index sees it) and is renamed into place. The temporary
+// name is unique per write, so a leftover can never block later writes; a failed write removes its own.
+export interface AtomicWriteOptions {
+  renameFile?: (from: string, to: string) => Promise<void>;
+  waitMs?: (ms: number) => Promise<void>;
+}
+
+export async function atomicWriteJson(filePath: string, value: unknown, options: AtomicWriteOptions = {}): Promise<void> {
+  const renameFile = options.renameFile ?? rename;
+  const waitMs = options.waitMs ?? delay;
+  temporaryCounter = (temporaryCounter + 1) % 1_000_000;
+  const temporaryPath = `${filePath}.${process.pid}-${Date.now()}-${temporaryCounter}.tmp`;
   try {
-    await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
-    await file.sync();
-  } finally {
-    await file.close();
+    const file = await open(temporaryPath, "wx");
+    try {
+      await file.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await renameFile(temporaryPath, filePath);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? "";
+        if (!LOCKED_CODES.has(code) || attempt >= RENAME_ATTEMPTS) throw error;
+        await waitMs(25 * attempt);
+      }
+    }
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw error;
   }
-  await rename(temporaryPath, filePath);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function moveQueueFile(source: string, destinationDirectory: string): Promise<void> {

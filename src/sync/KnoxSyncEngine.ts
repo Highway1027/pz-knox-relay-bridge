@@ -1,18 +1,27 @@
 // src/sync/KnoxSyncEngine.ts
 // v7 - 26-09-2026 - Stop desktop polling cleanly between transport stages
 
-import { access, readdir } from "node:fs/promises";
+import { access, readdir, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
 import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
 const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
 const KNOX_MISSION_INDEX_MAX = 64;
+
+const ACK_FILE = /^ack_evt_[A-Za-z0-9_-]{1,96}\.json$/;
+const ACK_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+
+// The mission as the backend sent it, plus this connection's network id and name.
+export function withFileIdentity(mission: ConnectorMission, config: Pick<KnoxBridgeConfig, "networkId" | "connectionName">): ConnectorMission & MissionFileIdentity {
+  const name = config.connectionName.trim().slice(0, 80);
+  return { ...mission, networkId: config.networkId, ...(name ? { connectionName: name } : {}) };
+}
 
 async function exists(filePath: string): Promise<boolean> {
   try {
@@ -36,6 +45,7 @@ export class KnoxSyncEngine {
   private missionRetryAttempts = 0;
   private missionBackendOnline: boolean | undefined;
   private lastKnoxMissionIndex?: string;
+  private nextAckPruneAt = 0;
 
   constructor(
     private readonly config: KnoxBridgeConfig,
@@ -62,6 +72,8 @@ export class KnoxSyncEngine {
       await this.pollMission();
       if (!this.running) return;
       await this.refreshKnoxMissionIndex();
+      if (!this.running) return;
+      await this.pruneOldAcknowledgements();
     } finally {
       this.polling = false;
     }
@@ -116,7 +128,7 @@ export class KnoxSyncEngine {
 
     if (message.type === 'mission_completed') {
       try {
-        await this.api.acknowledgeMissionCompleted(message.payload.missionId);
+        await this.api.acknowledgeMissionCompleted(message.payload.missionId, message.payload.saveId);
         await moveQueueFile(filePath, this.paths.gameProcessed);
         this.retryState.delete(fileName);
         this.logger.log('BRIDGE->KNOX', `mission ${message.payload.missionId} completed`);
@@ -131,7 +143,7 @@ export class KnoxSyncEngine {
 
     if (message.type === 'mission_declined') {
       try {
-        await this.api.acknowledgeMissionDeclined(message.payload.missionId);
+        await this.api.acknowledgeMissionDeclined(message.payload.missionId, message.payload.saveId);
         await moveQueueFile(filePath, this.paths.gameProcessed);
         this.retryState.delete(fileName);
         this.logger.log('BRIDGE->KNOX', `mission ${message.payload.missionId} declined`);
@@ -228,6 +240,28 @@ export class KnoxSyncEngine {
     this.lastKnoxMissionIndex = key;
   }
 
+  // PZ Lua cannot delete files, so every connector test leaves an ack_ file in bridge-to-game/pending.
+  // PZ reads its ack within seconds of the Bridge writing it; one older than a day is never read again.
+  // Runs at start and then every ten minutes; a file that is gone or locked is simply left for next time.
+  async pruneOldAcknowledgements(now = Date.now()): Promise<number> {
+    if (now < this.nextAckPruneAt) return 0;
+    this.nextAckPruneAt = now + ACK_PRUNE_INTERVAL_MS;
+    let removed = 0;
+    for (const name of await readdir(this.paths.bridgePending)) {
+      if (!ACK_FILE.test(name)) continue;
+      const filePath = path.join(this.paths.bridgePending, name);
+      try {
+        if (now - (await stat(filePath)).mtimeMs < this.config.acknowledgementMaxAgeMs) continue;
+        await unlink(filePath);
+        removed += 1;
+      } catch {
+        // Next round.
+      }
+    }
+    if (removed > 0) this.logger.info(`Removed ${removed} old ack_ file${removed === 1 ? "" : "s"} from bridge-to-game/pending`);
+    return removed;
+  }
+
   private async pollMission(): Promise<void> {
     if (!this.config.missionSyncEndpoint || Date.now() < this.nextMissionPollAt) return;
     this.nextMissionPollAt = Date.now() + this.config.missionPollIntervalMs;
@@ -243,7 +277,8 @@ export class KnoxSyncEngine {
       const pendingPath = path.join(this.paths.bridgePending, fileName);
       const processedPath = path.join(this.paths.bridgeProcessed, fileName);
       if (!(await exists(pendingPath)) && !(await exists(processedPath))) {
-        await atomicWriteJson(pendingPath, mission);
+        // Save identity (MISSION_API 13.9): the Connector links a save to the network of its first mission.
+        await atomicWriteJson(pendingPath, withFileIdentity(mission, this.config));
         this.logger.log("BRIDGE->PZ", `mission ${mission.missionId} queued`);
       }
       await this.api.acknowledgeMissionQueued(mission.missionId);

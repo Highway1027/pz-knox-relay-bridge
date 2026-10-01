@@ -21,7 +21,11 @@ export interface KnoxBridgeConfig {
   missionSyncEndpoint: string;
   missionPollIntervalMs: number;
   networkId: string;
+  // Name of the connection in the desktop app; written into mission files for the save link notice.
+  connectionName: string;
   connectorToken: string;
+  // Old ack_ files in bridge-to-game/pending (PZ Lua cannot delete them) are removed after this age.
+  acknowledgementMaxAgeMs: number;
 }
 
 export interface RuntimeEnvironment {
@@ -55,7 +59,9 @@ export const DEFAULT_CONFIG: KnoxBridgeConfig = {
   missionSyncEndpoint: "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxMissionSync",
   missionPollIntervalMs: 5000,
   networkId: "",
+  connectionName: "",
   connectorToken: "",
+  acknowledgementMaxAgeMs: 24 * 60 * 60 * 1000,
 };
 
 function positiveInteger(value: unknown, fallback: number): number {
@@ -103,7 +109,9 @@ export async function loadConfig(
     exchangeDirectory: exchange.directory,
     exchangeDirectorySource: exchange.source,
     networkId: nonEmpty(environment.KNOX_NETWORK_ID) ?? nonEmpty(raw.networkId) ?? "",
+    connectionName: nonEmpty(raw.connectionName) ?? "",
     connectorToken: nonEmpty(environment.KNOX_CONNECTOR_TOKEN) ?? nonEmpty(raw.connectorToken) ?? "",
+    acknowledgementMaxAgeMs: positiveInteger(raw.acknowledgementMaxAgeMs, DEFAULT_CONFIG.acknowledgementMaxAgeMs),
     pollIntervalMs: positiveInteger(raw.pollIntervalMs, DEFAULT_CONFIG.pollIntervalMs),
     stableFileAgeMs: positiveInteger(raw.stableFileAgeMs, DEFAULT_CONFIG.stableFileAgeMs),
     httpTimeoutMs: positiveInteger(raw.httpTimeoutMs, DEFAULT_CONFIG.httpTimeoutMs),

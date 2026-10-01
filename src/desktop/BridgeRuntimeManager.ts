@@ -26,7 +26,7 @@ export class BridgeRuntimeManager {
     assertSecureEndpoint(connection.missionSyncEndpoint, "missionSyncEndpoint");
     if (connection.syncEndpoint) assertSecureEndpoint(connection.syncEndpoint, "syncEndpoint");
     const token = await this.store.token(connection.id); const exchange = resolveExchangeDirectory(connection.exchangeRootOverride ? { exchangeRoot: connection.exchangeRootOverride } : {});
-    return { ...DEFAULT_CONFIG, networkId: connection.networkId, connectorToken: token, telemetryEndpoint: connection.telemetryEndpoint, missionSyncEndpoint: connection.missionSyncEndpoint, syncEndpoint: connection.syncEndpoint ?? DEFAULT_CONFIG.syncEndpoint, exchangeDirectory: exchange.directory, exchangeDirectorySource: exchange.source };
+    return { ...DEFAULT_CONFIG, networkId: connection.networkId, connectionName: connection.name, connectorToken: token, telemetryEndpoint: connection.telemetryEndpoint, missionSyncEndpoint: connection.missionSyncEndpoint, syncEndpoint: connection.syncEndpoint ?? DEFAULT_CONFIG.syncEndpoint, exchangeDirectory: exchange.directory, exchangeDirectorySource: exchange.source };
   }
   async start(connection: ConnectionMetadata): Promise<ConnectionRuntimeState> {
     const existing = this.active.get(connection.id);

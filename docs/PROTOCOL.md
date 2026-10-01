@@ -66,3 +66,16 @@ The Phase 4–6B test missions `test_001`–`test_007` were retired in Bridge 0.
 Missions whose id matches `knox_[a-z0-9_]{1,96}` come from the mission engine and use the open mission format. The Bridge checks the envelope only: `protocolVersion` 1, the id, an integer `missionVersion` (1–100,000), a `title` of 1–120 characters, and plain bounded JSON (at most 32 KB, depth 10). The Connector validates and interprets the content. Their `mission_completed` and `mission_declined` events may carry any `missionVersion` from 1 and an `objectiveType` of lowercase letters and underscores. All older mission ids keep their exact checks.
 
 **Index (Bridge 0.2.5+).** PZ Lua cannot list a folder, so the Bridge keeps `bridge-to-game/pending/knox_missions.json` up to date: `{ "protocolVersion": 1, "missionIds": ["knox_...", ...] }`, sorted, at most 64 ids, one per `mission_knox_*.json` file waiting in that folder. It is rewritten atomically after each poll when the list changed or the file is missing. The Connector (builds after 0.14.1) reads the index, then each listed mission file.
+
+## Save identity (Bridge 0.2.6+)
+
+Connector MISSION_API 13.9: each save links itself to one Knox network and ignores missions from other networks or for other saves.
+
+- **Mission files name their network.** The Bridge adds `networkId` and, when the connection has a name, `connectionName` (trimmed, at most 80 characters) to every mission file it writes, after validating the backend's mission. A `saveId` the backend put on a `knox_` mission passes through unchanged.
+- **Outcomes name their save.** `mission_completed` and `mission_declined` accept an optional `payload.saveId` (`save_` plus 1–40 lowercase letters or digits; anything else fails validation). The Bridge forwards it to `knoxMissionSync` as `saveId` on the `completed` / `declined` request; without it the request is unchanged.
+- The snapshot's `saveId` needs nothing from the Bridge: the snapshot is checked as an envelope only.
+
+## File writes and clean-up (Bridge 0.2.6+)
+
+- **Atomic writes.** Every file the Bridge writes for PZ (missions, the index, acknowledgements) goes to a temporary name that is unique per write and never ends in `.json`, then is renamed into place, so PZ sees the old file or the whole new one. Windows refuses the rename while another program has the target open (PZ reading the index); the Bridge retries a locked rename a few times (25–150 ms apart). A failed write removes its temporary file, so a leftover can never block later writes.
+- **Old `ack_` files.** PZ Lua cannot delete files, so every connector test left an `ack_evt_*.json` behind in `bridge-to-game/pending`. At start and then every ten minutes the Bridge removes the ones older than a day (`acknowledgementMaxAgeMs`, default 24 hours). PZ reads its acknowledgement within seconds, so an old one is never needed again.
