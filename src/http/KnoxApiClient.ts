@@ -13,7 +13,7 @@ export interface KnoxApiTransport {
   // saveId (optional): the save the outcome happened in; forwarded only when the Connector sent one.
   acknowledgeMissionCompleted(missionId: MissionId, saveId?: string): Promise<MissionQueuedResponse>;
   acknowledgeMissionDeclined(missionId: MissionId, saveId?: string): Promise<MissionQueuedResponse>;
-  // accepted / abandoned / failed; reason only for failed.
+  // accepted / abandoned / failed / expired; reason only for failed and expired.
   reportMissionState(kind: MissionStateKind, missionId: MissionId, saveId?: string, reason?: string): Promise<MissionQueuedResponse>;
 }
 

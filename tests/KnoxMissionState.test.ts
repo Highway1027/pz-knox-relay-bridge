@@ -54,6 +54,8 @@ test("state events validate with exactly their own field", () => {
   assert.throws(() => validateMissionState(event("mission_accepted", { abandonedBy: "steam:1" })), /invalid mission state event/);
   assert.throws(() => validateMissionState(event("mission_accepted", { acceptedBy: "" })), /invalid mission state event/);
   assert.throws(() => validateMissionState(event("mission_failed", { reason: "x".repeat(201) })), /invalid mission state event/);
+  assert.equal(validateMissionState(event("mission_expired", { reason: "The deadline passed." })).payload.reason, "The deadline passed.");
+  assert.throws(() => validateMissionState(event("mission_expired", {})), /invalid mission state event/);
   assert.throws(() => validateMissionState(event("mission_accepted", { acceptedBy: "steam:1", extra: 1 })), /invalid mission state event/);
   assert.throws(() => validateMissionState(event("mission_accepted", { acceptedBy: "steam:1", saveId: "BAD" })), /invalid mission state event/);
   assert.throws(() => validateMissionState(event("mission_toString", { acceptedBy: "steam:1" })), /invalid mission state event/);
@@ -75,6 +77,18 @@ test("state events are forwarded to the backend and archived", async () => {
     ]);
     assert.equal((await readdir(paths.gamePending)).length, 0);
     assert.equal((await readdir(paths.gameProcessed)).length, 2);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("an expiry is forwarded with its reason", async () => {
+  const { exchangeDirectory, paths, api, engine } = await fixture();
+  try {
+    await writeFile(path.join(paths.gamePending, "mission_expired_knox_t_1_v1.json"),
+      JSON.stringify(event("mission_expired", { reason: "The deadline passed.", saveId: "save_abc123" })));
+    await settle();
+    await engine.pollOnce();
+    assert.deepEqual(api.reports, [{ kind: "expired", missionId: "knox_t_1", saveId: "save_abc123", reason: "The deadline passed." }]);
+    assert.equal((await readdir(paths.gamePending)).length, 0);
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });
 

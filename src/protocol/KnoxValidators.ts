@@ -182,7 +182,7 @@ export function validateMissionDeclined(value: unknown): MissionDeclinedMessage 
 }
 
 // The one extra payload field of each state event, a string of 1 to 200 characters.
-export const MISSION_STATE_FIELDS: Readonly<Record<MissionStateKind, string>> = { accepted: "acceptedBy", abandoned: "abandonedBy", failed: "reason" };
+export const MISSION_STATE_FIELDS: Readonly<Record<MissionStateKind, string>> = { accepted: "acceptedBy", abandoned: "abandonedBy", failed: "reason", expired: "reason" };
 
 export function missionStateKind(type: unknown): MissionStateKind | undefined {
   const kind = typeof type === "string" && type.startsWith("mission_") ? type.slice(8) : "";

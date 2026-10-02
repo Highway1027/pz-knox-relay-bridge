@@ -136,8 +136,9 @@ export interface MissionDeclinedMessage {
 }
 
 // Other state changes of a Knox mission (Connector, 02-10-2026). One extra field per kind:
-// accepted -> acceptedBy, abandoned -> abandonedBy, failed -> reason (a short sentence).
-export type MissionStateKind = "accepted" | "abandoned" | "failed";
+// accepted -> acceptedBy, abandoned -> abandonedBy, failed and expired -> reason (a short sentence).
+// expired: closed by its deadline (onExpire), Connector 0.18.1+.
+export type MissionStateKind = "accepted" | "abandoned" | "failed" | "expired";
 export interface MissionStateMessage {
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;
   messageId: string;
