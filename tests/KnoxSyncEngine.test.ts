@@ -55,6 +55,9 @@ class FakeApi implements KnoxApiTransport {
   async acknowledgeMissionDeclined(missionId: MissionId): Promise<MissionQueuedResponse> {
     return { ok: true, protocolVersion: 1, missionId };
   }
+  async reportMissionState(_kind: string, missionId: MissionId): Promise<MissionQueuedResponse> {
+    return { ok: true, protocolVersion: 1, missionId };
+  }
 }
 
 async function writeTelemetry(directory: string, messageId: string, x: number): Promise<void> {

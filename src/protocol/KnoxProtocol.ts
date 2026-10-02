@@ -135,6 +135,17 @@ export interface MissionDeclinedMessage {
   payload: { missionId: MissionId; missionVersion: number; declinedBy: string; saveId?: string };
 }
 
+// Other state changes of a Knox mission (Connector, 02-10-2026). One extra field per kind:
+// accepted -> acceptedBy, abandoned -> abandonedBy, failed -> reason (a short sentence).
+export type MissionStateKind = "accepted" | "abandoned" | "failed";
+export interface MissionStateMessage {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: string;
+  type: `mission_${MissionStateKind}`;
+  createdAt: string;
+  payload: { missionId: MissionId; missionVersion: number; acceptedBy?: string; abandonedBy?: string; reason?: string; saveId?: string };
+}
+
 // Added by the Bridge to every mission file it writes, so the Connector can link a save to one network.
 export interface MissionFileIdentity {
   networkId: string;

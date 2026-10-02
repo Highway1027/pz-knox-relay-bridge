@@ -75,6 +75,10 @@ Connector MISSION_API 13.9: each save links itself to one Knox network and ignor
 - **Outcomes name their save.** `mission_completed` and `mission_declined` accept an optional `payload.saveId` (`save_` plus 1–40 lowercase letters or digits; anything else fails validation). The Bridge forwards it to `knoxMissionSync` as `saveId` on the `completed` / `declined` request; without it the request is unchanged.
 - The snapshot's `saveId` needs nothing from the Bridge: the snapshot is checked as an envelope only.
 
+## Mission state events (Bridge 0.2.6+)
+
+Besides completion and decline, the Connector reports the other state changes of a Knox mission, once per mission version: `mission_accepted` (`payload.acceptedBy`), `mission_abandoned` (`payload.abandonedBy`) and `mission_failed` (`payload.reason`, a short sentence). Same envelope and checks as `mission_declined`: `missionId`, `missionVersion`, the one field (a string of 1–200 characters) and optionally `saveId`; nothing else. The Bridge forwards each to `knoxMissionSync` with `action` `accepted` / `abandoned` / `failed`, plus `saveId` when present and, for `failed`, `reason`. A backend error keeps the file queued and retries with backoff, like an outcome. Files are handled in name order, so an `abandoned` may reach the backend before its `accepted`; the backend never lets `accepted` replace a closed state.
+
 ## File writes and clean-up (Bridge 0.2.6+)
 
 - **Atomic writes.** Every file the Bridge writes for PZ (missions, the index, acknowledgements) goes to a temporary name that is unique per write and never ends in `.json`, then is renamed into place, so PZ sees the old file or the whole new one. Windows refuses the rename while another program has the target open (PZ reading the index); the Bridge retries a locked rename a few times (25–150 ms apart). A failed write removes its temporary file, so a leftover can never block later writes.

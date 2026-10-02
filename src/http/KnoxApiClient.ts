@@ -2,7 +2,7 @@
 // v5 - 26-09-2026 - Relay authoritative mission completion and decline state
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse } from "../protocol/KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind } from "../protocol/KnoxProtocol.js";
 import { validateMissionPullResponse, validateMissionQueuedResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
@@ -13,6 +13,8 @@ export interface KnoxApiTransport {
   // saveId (optional): the save the outcome happened in; forwarded only when the Connector sent one.
   acknowledgeMissionCompleted(missionId: MissionId, saveId?: string): Promise<MissionQueuedResponse>;
   acknowledgeMissionDeclined(missionId: MissionId, saveId?: string): Promise<MissionQueuedResponse>;
+  // accepted / abandoned / failed; reason only for failed.
+  reportMissionState(kind: MissionStateKind, missionId: MissionId, saveId?: string, reason?: string): Promise<MissionQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -90,7 +92,11 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateMissionQueuedResponse(await this.missionRequest({ action: 'declined', missionId, ...(saveId ? { saveId } : {}) }));
   }
 
-  private async missionRequest(action: { action: "pull" } | { action: "queued" | "completed" | "declined"; missionId: MissionId; saveId?: string }): Promise<unknown> {
+  async reportMissionState(kind: MissionStateKind, missionId: MissionId, saveId?: string, reason?: string): Promise<MissionQueuedResponse> {
+    return validateMissionQueuedResponse(await this.missionRequest({ action: kind, missionId, ...(saveId ? { saveId } : {}), ...(reason ? { reason } : {}) }));
+  }
+
+  private async missionRequest(action: { action: "pull" } | { action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");
     if (!this.config.connectorToken) throw new Error("connectorToken is not configured");

@@ -2,7 +2,7 @@
 // v7 - 27-09-2026 - Optional telemetry snapshot and open knox_ missions (envelope checks)
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -179,4 +179,28 @@ export function validateMissionDeclined(value: unknown): MissionDeclinedMessage 
       !validMissionVersion(payload.missionId, payload.missionVersion) || typeof payload.declinedBy !== 'string' || payload.declinedBy.length < 1)
     throw new Error('invalid mission decline');
   return message as unknown as MissionDeclinedMessage;
+}
+
+// The one extra payload field of each state event, a string of 1 to 200 characters.
+export const MISSION_STATE_FIELDS: Readonly<Record<MissionStateKind, string>> = { accepted: "acceptedBy", abandoned: "abandonedBy", failed: "reason" };
+
+export function missionStateKind(type: unknown): MissionStateKind | undefined {
+  const kind = typeof type === "string" && type.startsWith("mission_") ? type.slice(8) : "";
+  return Object.hasOwn(MISSION_STATE_FIELDS, kind) ? kind as MissionStateKind : undefined;
+}
+
+export function validateMissionState(value: unknown): MissionStateMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("message root must be an object");
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  const kind = missionStateKind(message.type);
+  const field = kind ? MISSION_STATE_FIELDS[kind] : "";
+  if (!kind || !exactKeys(message, ["protocolVersion", "messageId", "type", "createdAt", "payload"]) || message.protocolVersion !== 1 ||
+      typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !payloadKeysWithSave(payload, ["missionId", "missionVersion", field]) || !isMissionId(payload.missionId) ||
+      !validMissionVersion(payload.missionId, payload.missionVersion) || typeof payload[field] !== "string" ||
+      (payload[field] as string).length < 1 || (payload[field] as string).length > 200)
+    throw new Error("invalid mission state event");
+  return message as unknown as MissionStateMessage;
 }

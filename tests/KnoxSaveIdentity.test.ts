@@ -29,6 +29,9 @@ class FakeApi implements KnoxApiTransport {
     this.outcomes.push({ action: "declined", missionId, ...(saveId ? { saveId } : {}) });
     return { ok: true, protocolVersion: 1, missionId };
   }
+  async reportMissionState(kind: string, missionId: MissionId): Promise<MissionQueuedResponse> {
+    return { ok: true, protocolVersion: 1, missionId };
+  }
 }
 
 async function fixture(extra: Partial<typeof DEFAULT_CONFIG> = {}) {
