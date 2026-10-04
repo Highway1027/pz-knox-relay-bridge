@@ -2,7 +2,8 @@
 // v7 - 27-09-2026 - Optional telemetry snapshot and open knox_ missions (envelope checks)
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
+import { createHash as createSha256 } from "node:crypto";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -68,6 +69,50 @@ export function validateTelemetryResponse(value: unknown, messageId: string): Kn
   if (response.ok !== true || response.protocolVersion !== 1 || response.messageId !== messageId) throw new Error("backend did not acknowledge telemetry");
   return response as unknown as KnoxTelemetryResponse;
 }
+
+const AUDIO_ID_PATTERN = /^audio_[a-f0-9]{32}$/;
+const AUDIO_BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+const MAX_AUDIO_BYTES = 1_500_000;
+
+export function validateAudioPullResponse(value: unknown): AudioPullResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("audio response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (!exactKeys(response, ["ok", "protocolVersion", "audio"]) || response.ok !== true || response.protocolVersion !== 1) {
+    throw new Error("invalid audio response envelope");
+  }
+  if (response.audio === null) return response as unknown as AudioPullResponse;
+  if (!response.audio || typeof response.audio !== "object" || Array.isArray(response.audio)) throw new Error("invalid audio payload");
+  const audio = response.audio as Record<string, unknown>;
+  if (!exactKeys(audio, ["audioId", "fileName", "fileSizeBytes", "durationSeconds", "sha256", "audioBase64"]) ||
+      typeof audio.audioId !== "string" || !AUDIO_ID_PATTERN.test(audio.audioId) ||
+      typeof audio.fileName !== "string" || audio.fileName.length < 1 || audio.fileName.length > 128 ||
+      audio.fileName.includes("/") || audio.fileName.includes("\\") ||
+      !Number.isInteger(audio.fileSizeBytes) || Number(audio.fileSizeBytes) < 44 || Number(audio.fileSizeBytes) > MAX_AUDIO_BYTES ||
+      !(audio.durationSeconds === null || (typeof audio.durationSeconds === "number" && Number.isFinite(audio.durationSeconds) && audio.durationSeconds > 0 && audio.durationSeconds <= 120)) ||
+      typeof audio.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(audio.sha256) ||
+      typeof audio.audioBase64 !== "string" || audio.audioBase64.length > Math.ceil(MAX_AUDIO_BYTES / 3) * 4 ||
+      !AUDIO_BASE64_PATTERN.test(audio.audioBase64)) {
+    throw new Error("invalid audio fields");
+  }
+  const decoded = Buffer.from(audio.audioBase64, "base64");
+  if (decoded.length !== audio.fileSizeBytes || decoded.toString("ascii", 0, 4) !== "RIFF" ||
+      decoded.toString("ascii", 8, 12) !== "WAVE" ||
+      createSha256("sha256").update(decoded).digest("hex") !== audio.sha256) {
+    throw new Error("audio WAV size, header or checksum does not match");
+  }
+  return response as unknown as AudioPullResponse;
+}
+
+export function validateAudioQueuedResponse(value: unknown, audioId: string): AudioQueuedResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("audio acknowledgement root must be an object");
+  const response = value as Record<string, unknown>;
+  if (!exactKeys(response, ["ok", "protocolVersion", "audioId"]) || response.ok !== true ||
+      response.protocolVersion !== 1 || response.audioId !== audioId || !AUDIO_ID_PATTERN.test(String(response.audioId))) {
+    throw new Error("backend did not acknowledge queued audio");
+  }
+  return response as unknown as AudioQueuedResponse;
+}
+
 
 function isMissionId(value: unknown): value is MissionId {
   return typeof value === "string" && (/^mission_v0[2]?_[a-z0-9_]{1,96}$/.test(value) || ENVELOPE_MISSION_ID.test(value));

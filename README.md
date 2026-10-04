@@ -26,6 +26,7 @@ Accepted setup JSON:
 {
   "telemetryEndpoint": "https://...",
   "missionSyncEndpoint": "https://...",
+  "audioSyncEndpoint": "https://...",
   "networkId": "...",
   "connectorToken": "..."
 }
@@ -107,6 +108,7 @@ Safe template:
 
 - asynchronous Node `fetch` with a five-second default timeout;
 - capped exponential retry from two to sixty seconds;
+- experimental TTS audio pulls use a bounded WAV payload and checksum validation;
 - failed sends remain pending;
 - input archives only after a valid backend response;
 - temporary-file-plus-rename writes for local acknowledgements;

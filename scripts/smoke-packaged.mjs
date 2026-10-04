@@ -61,7 +61,7 @@ const server = createServer((request, response) => {
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}`;
-const setup = { networkId: 'packaged-smoke-network', connectorToken: token, telemetryEndpoint: `${endpoint}/telemetry`, missionSyncEndpoint: `${endpoint}/missions`, syncEndpoint: `${endpoint}/ping` };
+const setup = { networkId: 'packaged-smoke-network', connectorToken: token, telemetryEndpoint: `${endpoint}/telemetry`, missionSyncEndpoint: `${endpoint}/missions`, audioSyncEndpoint: `${endpoint}/audio`, syncEndpoint: `${endpoint}/ping` };
 
 async function launch(phase, action) {
   // The packaged child gets only Windows utilities on PATH, no Node/npm or Electron development flags.

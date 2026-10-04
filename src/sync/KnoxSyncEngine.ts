@@ -11,6 +11,7 @@ import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity,
 import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, missionStateKind } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
+export const KNOX_AUDIO_INDEX_FILE = "knox_audio.json";
 const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
 const KNOX_MISSION_INDEX_MAX = 64;
 
@@ -44,6 +45,8 @@ export class KnoxSyncEngine {
   private lastTelemetryMessageId?: string;
   private telemetryRetry = { messageId: "", attempts: 0, retryAt: 0 };
   private nextMissionPollAt = 0;
+  private nextAudioPollAt = 0;
+  private audioRetryAttempts = 0;
   private missionRetryAttempts = 0;
   private missionBackendOnline: boolean | undefined;
   private lastKnoxMissionIndex?: string;
@@ -72,6 +75,8 @@ export class KnoxSyncEngine {
       await this.processTelemetrySnapshot();
       if (!this.running) return;
       await this.pollMission();
+      if (!this.running) return;
+      await this.pollAudio();
       if (!this.running) return;
       await this.refreshKnoxMissionIndex();
       if (!this.running) return;
@@ -309,6 +314,37 @@ export class KnoxSyncEngine {
       if (this.missionBackendOnline !== false) this.logger.log("HTTP", "mission sync OFFLINE");
       this.missionBackendOnline = false;
       this.logger.error(`mission sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async pollAudio(): Promise<void> {
+    if (!this.config.audioSyncEndpoint || Date.now() < this.nextAudioPollAt) return;
+    this.nextAudioPollAt = Date.now() + this.config.missionPollIntervalMs;
+    try {
+      const response = await this.api.pullAudio();
+      this.audioRetryAttempts = 0;
+      if (!response.audio) return;
+      const audio = response.audio;
+      const fileName = `audio_${audio.audioId}.json`;
+      const pendingPath = path.join(this.paths.bridgePending, fileName);
+      const processedPath = path.join(this.paths.bridgeProcessed, fileName);
+      if (!(await exists(pendingPath)) && !(await exists(processedPath))) {
+        await atomicWriteJson(pendingPath, {
+          protocolVersion: KNOX_PROTOCOL_VERSION,
+          ...audio,
+        });
+      }
+      await atomicWriteJson(path.join(this.paths.bridgePending, KNOX_AUDIO_INDEX_FILE), {
+        protocolVersion: KNOX_PROTOCOL_VERSION,
+        audioIds: [audio.audioId],
+      });
+      await this.api.acknowledgeAudioQueued(audio.audioId);
+      this.logger.log("KNOX->BRIDGE", `audio ${audio.audioId} queued for the Connector`);
+    } catch (error) {
+      this.audioRetryAttempts += 1;
+      const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.audioRetryAttempts - 1, 20)), this.config.retryMaxMs);
+      this.nextAudioPollAt = Date.now() + delay;
+      this.logger.error(`audio sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }

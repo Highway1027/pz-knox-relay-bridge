@@ -19,6 +19,7 @@ export interface KnoxBridgeConfig {
   syncEndpoint: string;
   telemetryEndpoint: string;
   missionSyncEndpoint: string;
+  audioSyncEndpoint: string;
   missionPollIntervalMs: number;
   networkId: string;
   // Name of the connection in the desktop app; written into mission files for the save link notice.
@@ -46,7 +47,7 @@ export function automaticExchangeDirectory(homeDirectory = os.homedir(), platfor
 }
 
 export const DEFAULT_CONFIG: KnoxBridgeConfig = {
-  connectorVersion: "0.1.0",
+  connectorVersion: "0.2.8",
   exchangeDirectory: automaticExchangeDirectory(),
   exchangeDirectorySource: "automatic",
   pollIntervalMs: 1000,
@@ -57,6 +58,7 @@ export const DEFAULT_CONFIG: KnoxBridgeConfig = {
   syncEndpoint: "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxConnectorPing",
   telemetryEndpoint: "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxTelemetryIngest",
   missionSyncEndpoint: "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxMissionSync",
+  audioSyncEndpoint: "https://europe-west1-wildshape-tracker.cloudfunctions.net/knoxAudioSync",
   missionPollIntervalMs: 5000,
   networkId: "",
   connectionName: "",

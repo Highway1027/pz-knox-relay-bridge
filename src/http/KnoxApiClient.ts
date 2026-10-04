@@ -2,8 +2,8 @@
 // v5 - 26-09-2026 - Relay authoritative mission completion and decline state
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind } from "../protocol/KnoxProtocol.js";
-import { validateMissionPullResponse, validateMissionQueuedResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind } from "../protocol/KnoxProtocol.js";
+import { validateAudioPullResponse, validateAudioQueuedResponse, validateMissionPullResponse, validateMissionQueuedResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
   sendConnectorTest(message: "hello from Project Zomboid"): Promise<KnoxPingResponse>;
@@ -15,6 +15,8 @@ export interface KnoxApiTransport {
   acknowledgeMissionDeclined(missionId: MissionId, saveId?: string): Promise<MissionQueuedResponse>;
   // accepted / abandoned / failed / expired; reason only for failed and expired.
   reportMissionState(kind: MissionStateKind, missionId: MissionId, saveId?: string, reason?: string): Promise<MissionQueuedResponse>;
+  pullAudio(): Promise<AudioPullResponse>;
+  acknowledgeAudioQueued(audioId: AudioId): Promise<AudioQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -94,6 +96,41 @@ export class KnoxApiClient implements KnoxApiTransport {
 
   async reportMissionState(kind: MissionStateKind, missionId: MissionId, saveId?: string, reason?: string): Promise<MissionQueuedResponse> {
     return validateMissionQueuedResponse(await this.missionRequest({ action: kind, missionId, ...(saveId ? { saveId } : {}), ...(reason ? { reason } : {}) }));
+  }
+
+  async pullAudio(): Promise<AudioPullResponse> {
+    return validateAudioPullResponse(await this.audioRequest({ action: "pull" }));
+  }
+
+  async acknowledgeAudioQueued(audioId: AudioId): Promise<AudioQueuedResponse> {
+    return validateAudioQueuedResponse(await this.audioRequest({ action: "queued", audioId }), audioId);
+  }
+
+  private async audioRequest(action: { action: "pull" } | { action: "queued"; audioId: AudioId }): Promise<unknown> {
+    if (!this.config.audioSyncEndpoint) throw new Error("audioSyncEndpoint is not configured");
+    if (!this.config.networkId) throw new Error("networkId is not configured");
+    if (!this.config.connectorToken) throw new Error("connectorToken is not configured");
+    let response: Response;
+    const timeoutMs = Math.max(this.config.httpTimeoutMs, 30000);
+    try {
+      response = await fetch(this.config.audioSyncEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Knox-Connector-Token": this.config.connectorToken },
+        body: JSON.stringify({
+          protocolVersion: KNOX_PROTOCOL_VERSION,
+          connectorVersion: this.config.connectorVersion,
+          networkId: this.config.networkId,
+          ...action,
+        }),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "NetworkError";
+      throw new Error(name === "TimeoutError" ? `request timed out after ${timeoutMs}ms` : `network request failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!response.ok) throw new Error(`backend returned HTTP ${response.status}`);
+    try { return await response.json(); }
+    catch (error) { throw new Error(`invalid backend response: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
   private async missionRequest(action: { action: "pull" } | { action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }): Promise<unknown> {

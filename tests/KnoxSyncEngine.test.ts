@@ -2,6 +2,7 @@
 // v6 - 26-09-2026 - Support completion and decline transport
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -10,8 +11,8 @@ import { DEFAULT_CONFIG } from "../src/config/KnoxBridgeConfig.js";
 import { ensureQueueDirectories, queuePaths } from "../src/files/KnoxQueue.js";
 import type { KnoxApiTransport } from "../src/http/KnoxApiClient.js";
 import { KnoxLogger } from "../src/logging/KnoxLogger.js";
-import type { ConnectorMission, GameTelemetryMessage, MissionId, MissionPullResponse, MissionQueuedResponse, KnoxPingResponse, KnoxTelemetryResponse } from "../src/protocol/KnoxProtocol.js";
-import { KnoxSyncEngine } from "../src/sync/KnoxSyncEngine.js";
+import type { AudioId, AudioPullResponse, AudioQueuedResponse, ConnectorMission, GameTelemetryMessage, MissionId, MissionPullResponse, MissionQueuedResponse, KnoxPingResponse, KnoxTelemetryResponse } from "../src/protocol/KnoxProtocol.js";
+import { KNOX_AUDIO_INDEX_FILE, KnoxSyncEngine } from "../src/sync/KnoxSyncEngine.js";
 
 class FakeApi implements KnoxApiTransport {
   calls = 0;
@@ -21,6 +22,9 @@ class FakeApi implements KnoxApiTransport {
   missionPulls = 0;
   missionAcks = 0;
   missionShouldFail = false;
+  audioClip: AudioPullResponse["audio"] = null;
+  audioPulls = 0;
+  audioAcks: AudioId[] = [];
 
   async sendConnectorTest(): Promise<KnoxPingResponse> {
     this.calls += 1;
@@ -57,6 +61,16 @@ class FakeApi implements KnoxApiTransport {
   }
   async reportMissionState(_kind: string, missionId: MissionId): Promise<MissionQueuedResponse> {
     return { ok: true, protocolVersion: 1, missionId };
+  }
+
+  async pullAudio(): Promise<AudioPullResponse> {
+    this.audioPulls += 1;
+    return { ok: true, protocolVersion: 1, audio: this.audioClip };
+  }
+
+  async acknowledgeAudioQueued(audioId: AudioId): Promise<AudioQueuedResponse> {
+    this.audioAcks.push(audioId);
+    return { ok: true, protocolVersion: 1, audioId };
   }
 }
 
@@ -189,6 +203,38 @@ test("queues one validated mission file and does not recreate an archived missio
     await readFile(path.join(paths.bridgeProcessed, "mission_knox_transport_check_1.json"), "utf8");
     assert.equal(api.missionAcks, 2);
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("writes a generated WAV and audio index before acknowledging Bridge receipt", async () => {
+  const api = new FakeApi();
+  const wav = Buffer.alloc(44);
+  wav.write("RIFF", 0, "ascii");
+  wav.writeUInt32LE(36, 4);
+  wav.write("WAVE", 8, "ascii");
+  wav.write("fmt ", 12, "ascii");
+  wav.write("data", 36, "ascii");
+  const audioId = "audio_0123456789abcdef0123456789abcdef";
+  api.audioClip = {
+    audioId,
+    fileName: "test.wav",
+    fileSizeBytes: wav.length,
+    durationSeconds: 0.01,
+    sha256: createHash("sha256").update(wav).digest("hex"),
+    audioBase64: wav.toString("base64"),
+  };
+  const { exchangeDirectory, paths, engine } = await fixture(api);
+  try {
+    await engine.pollOnce();
+
+    const asset = JSON.parse(await readFile(path.join(paths.bridgePending, `audio_${audioId}.json`), "utf8"));
+    assert.equal(asset.audioId, audioId);
+    assert.equal(Buffer.from(asset.audioBase64, "base64").length, wav.length);
+    const index = JSON.parse(await readFile(path.join(paths.bridgePending, KNOX_AUDIO_INDEX_FILE), "utf8"));
+    assert.deepEqual(index.audioIds, [audioId]);
+    assert.deepEqual(api.audioAcks, [audioId]);
+  } finally {
+    await rm(exchangeDirectory, { recursive: true, force: true });
+  }
 });
 
 test("archives a locally queued mission after the PZ acknowledgement", async () => {

@@ -2,11 +2,12 @@
 // v5 - 26-09-2026 - Verify hardened dynamic recon and decline validation
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import test from "node:test";
 import { DEFAULT_CONFIG } from "../src/config/KnoxBridgeConfig.js";
 import { KnoxApiClient } from "../src/http/KnoxApiClient.js";
-import { validateMissionDeclined, validateMission } from "../src/protocol/KnoxValidators.js";
+import { validateAudioPullResponse, validateMissionDeclined, validateMission } from "../src/protocol/KnoxValidators.js";
 
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -33,7 +34,7 @@ test("posts the exact ping schema and validates the response", async () => {
     const result = await client.sendConnectorTest("hello from Project Zomboid");
     assert.deepEqual(received, {
       protocolVersion: 1,
-      connectorVersion: "0.1.0",
+      connectorVersion: "0.2.8",
       message: "hello from Project Zomboid",
     });
     assert.equal(result.message, "hello from Knox Relay");
@@ -67,7 +68,7 @@ test("posts telemetry with Network association and connector token", async () =>
     const telemetryEndpoint = await listen(server);
     const client = new KnoxApiClient({ ...DEFAULT_CONFIG, telemetryEndpoint, networkId: "network-1", connectorToken: "secret" });
     await client.sendTelemetry({ protocolVersion: 1, messageId: "evt_telemetry_api", type: "game_telemetry", createdAt: new Date().toISOString(), payload: { gameTime: { year: 1993, month: 7, day: 9, hour: 12, minute: 0 }, players: [{ username: "Tim", characterName: "Tim Knox", x: 1, y: 2, z: 0 }] } });
-    assert.equal(received.networkId, "network-1"); assert.equal(received.connectorVersion, "0.1.0"); assert.equal(receivedToken, "secret");
+    assert.equal(received.networkId, "network-1"); assert.equal(received.connectorVersion, "0.2.8"); assert.equal(receivedToken, "secret");
   } finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
 });
 
@@ -81,6 +82,63 @@ test("pulls and acknowledges an open mission", async () => {
       response.end(JSON.stringify(value.action === "pull"
         ? { ok: true, protocolVersion: 1, mission: { protocolVersion: 1, missionId: "knox_transport_check_1", missionVersion: 1, title: "Transport Check", summary: "Checks transport.", objectives: [] } }
         : { ok: true, protocolVersion: 1, missionId: value.missionId }));
+    });
+
+    test("pulls and acknowledges a WAV using the Bridge token", async () => {
+      const wav = Buffer.alloc(44);
+      wav.write("RIFF", 0, "ascii");
+      wav.writeUInt32LE(36, 4);
+      wav.write("WAVE", 8, "ascii");
+      wav.write("fmt ", 12, "ascii");
+      wav.write("data", 36, "ascii");
+      const audioId = "audio_0123456789abcdef0123456789abcdef";
+      const audio = {
+        audioId, fileName: "clip.wav", fileSizeBytes: wav.length, durationSeconds: 0.01,
+        sha256: createHash("sha256").update(wav).digest("hex"), audioBase64: wav.toString("base64"),
+      };
+      const actions: any[] = [];
+      let receivedToken = "";
+      const server = createServer((request, response) => {
+        let body = "";
+        request.setEncoding("utf8");
+        request.on("data", (chunk) => { body += chunk; });
+        request.on("end", () => {
+          const value = JSON.parse(body);
+          actions.push(value);
+          receivedToken = String(request.headers["x-knox-connector-token"]);
+          response.writeHead(200, { "Content-Type": "application/json" });
+          response.end(JSON.stringify(value.action === "pull"
+            ? { ok: true, protocolVersion: 1, audio }
+            : { ok: true, protocolVersion: 1, audioId }));
+        });
+      });
+      try {
+        const audioSyncEndpoint = await listen(server);
+        const client = new KnoxApiClient({ ...DEFAULT_CONFIG, audioSyncEndpoint, networkId: "network-1", connectorToken: "secret" });
+        assert.equal((await client.pullAudio()).audio?.audioId, audioId);
+        await client.acknowledgeAudioQueued(audioId);
+        assert.deepEqual(actions.map((value) => value.action), ["pull", "queued"]);
+        assert.equal(actions[0].networkId, "network-1");
+        assert.equal(receivedToken, "secret");
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    });
+
+    test("rejects a WAV with a mismatched checksum", () => {
+      const wav = Buffer.alloc(44);
+      wav.write("RIFF", 0, "ascii");
+      wav.write("WAVE", 8, "ascii");
+      const audio = {
+        audioId: "audio_0123456789abcdef0123456789abcdef",
+        fileName: "clip.wav",
+        fileSizeBytes: wav.length,
+        durationSeconds: null,
+        sha256: "0".repeat(64),
+        audioBase64: wav.toString("base64"),
+      };
+      assert.throws(() => validateAudioPullResponse({ ok: true, protocolVersion: 1, audio }), /checksum/);
     });
   });
   try {

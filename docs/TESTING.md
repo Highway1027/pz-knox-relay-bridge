@@ -5,6 +5,19 @@
 
 `npm test` verifies the Phase 2 transport plus telemetry POST association/authentication, retry recovery, and stale-snapshot coalescing.
 
+## Experimental global audio probe (Bridge 0.2.8)
+
+This requires the Connector 0.20.0 build and deployed `knoxQueueTtsAudio` and
+`knoxAudioSync` functions. Only the host needs the Bridge.
+
+1. Start the host Bridge and a hosted Project Zomboid game. Join from a second client.
+2. In the webapp Development tab, generate and send one fresh TTS clip (about 11 seconds).
+3. Confirm the Bridge logs the WAV as queued and the game server logs its broadcast.
+4. Confirm both host and remote client can actually hear the clip. Do not treat the webapp's
+   queue confirmation or the Connector's start log as proof of audible playback.
+5. Record any Java/Kahlua or mixer errors from `console.txt`. Players do not install audio
+   files or run a Bridge.
+
 ## Manual B42.20.4 telemetry gate
 
 1. After deployment approval, run `npm start` and enter the selected Network ID and token in the first-run wizard, or supply the documented environment variables.

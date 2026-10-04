@@ -10,7 +10,7 @@ import { DEFAULT_CONFIG } from "../src/config/KnoxBridgeConfig.js";
 import { ensureQueueDirectories, queuePaths } from "../src/files/KnoxQueue.js";
 import type { KnoxApiTransport } from "../src/http/KnoxApiClient.js";
 import { KnoxLogger } from "../src/logging/KnoxLogger.js";
-import type { GameTelemetryMessage, MissionId, MissionPullResponse, MissionQueuedResponse, MissionStateKind, KnoxPingResponse, KnoxTelemetryResponse } from "../src/protocol/KnoxProtocol.js";
+import type { AudioId, AudioPullResponse, AudioQueuedResponse, GameTelemetryMessage, MissionId, MissionPullResponse, MissionQueuedResponse, MissionStateKind, KnoxPingResponse, KnoxTelemetryResponse } from "../src/protocol/KnoxProtocol.js";
 import { validateMissionState } from "../src/protocol/KnoxValidators.js";
 import { KnoxSyncEngine } from "../src/sync/KnoxSyncEngine.js";
 
@@ -20,6 +20,8 @@ class FakeApi implements KnoxApiTransport {
   async sendConnectorTest(): Promise<KnoxPingResponse> { return { ok: true, protocolVersion: 1, message: "hello from Knox Relay" }; }
   async sendTelemetry(message: GameTelemetryMessage): Promise<KnoxTelemetryResponse> { return { ok: true, protocolVersion: 1, messageId: message.messageId }; }
   async pullMission(): Promise<MissionPullResponse> { return { ok: true, protocolVersion: 1, mission: null }; }
+  async pullAudio(): Promise<AudioPullResponse> { return { ok: true, protocolVersion: 1, audio: null }; }
+  async acknowledgeAudioQueued(audioId: AudioId): Promise<AudioQueuedResponse> { return { ok: true, protocolVersion: 1, audioId }; }
   async acknowledgeMissionQueued(missionId: MissionId): Promise<MissionQueuedResponse> { return { ok: true, protocolVersion: 1, missionId }; }
   async acknowledgeMissionCompleted(missionId: MissionId): Promise<MissionQueuedResponse> { return { ok: true, protocolVersion: 1, missionId }; }
   async acknowledgeMissionDeclined(missionId: MissionId): Promise<MissionQueuedResponse> { return { ok: true, protocolVersion: 1, missionId }; }

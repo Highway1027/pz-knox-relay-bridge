@@ -152,3 +152,26 @@ export interface MissionFileIdentity {
   networkId: string;
   connectionName?: string;
 }
+
+export type AudioId = `audio_${string}`;
+
+export interface KnoxAudioClip {
+  audioId: AudioId;
+  fileName: string;
+  fileSizeBytes: number;
+  durationSeconds: number | null;
+  sha256: string;
+  audioBase64: string;
+}
+
+export interface AudioPullResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  audio: KnoxAudioClip | null;
+}
+
+export interface AudioQueuedResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  audioId: AudioId;
+}

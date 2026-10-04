@@ -10,7 +10,7 @@ The Bridge posts:
 ```json
 {
   "protocolVersion": 1,
-  "connectorVersion": "0.1.0",
+  "connectorVersion": "0.2.8",
   "message": "hello from Project Zomboid"
 }
 ```
@@ -78,6 +78,16 @@ Connector MISSION_API 13.9: each save links itself to one Knox network and ignor
 ## Mission state events (Bridge 0.2.6+)
 
 Besides completion and decline, the Connector reports the other state changes of a Knox mission, once per mission version: `mission_accepted` (`payload.acceptedBy`), `mission_abandoned` (`payload.abandonedBy`), `mission_failed` (`payload.reason`, a short sentence) and, from Bridge 0.2.7 (Connector 0.18.1), `mission_expired` (`payload.reason`; the mission was closed by its deadline). Same envelope and checks as `mission_declined`: `missionId`, `missionVersion`, the one field (a string of 1–200 characters) and optionally `saveId`; nothing else. The Bridge forwards each to `knoxMissionSync` with `action` `accepted` / `abandoned` / `failed` / `expired`, plus `saveId` when present and, for `failed` and `expired`, `reason`. A backend error keeps the file queued and retries with backoff, like an outcome. Files are handled in name order, so an `abandoned` may reach the backend before its `accepted`; the backend never lets `accepted` replace a closed state.
+
+## Experimental global audio test (Bridge 0.2.8)
+
+The Development tab generates a new WAV and queues it for the selected Knox network. The
+Bridge pulls it from the authenticated `knoxAudioSync` endpoint, validates the exact
+response envelope, base64 payload, RIFF/WAVE header, 1.5 MB size cap, and SHA-256, then
+atomically writes `bridge-to-game/pending/audio_<audioId>.json` plus the
+`knox_audio.json` index. It acknowledges local queueing only after both files exist. This
+does not confirm playback. The Connector server distributes the clip to currently
+connected clients; client Java Sound playback remains an unverified in-game probe.
 
 ## File writes and clean-up (Bridge 0.2.6+)
 
