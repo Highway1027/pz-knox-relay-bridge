@@ -7,11 +7,13 @@ import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage } from "../protocol/KnoxProtocol.js";
-import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, missionStateKind } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile } from "../protocol/KnoxProtocol.js";
+import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, missionStateKind } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
 export const KNOX_AUDIO_INDEX_FILE = "knox_audio.json";
+// The backend's answer to the latest "New mission" request, for the Connector (Bridge 0.2.9).
+export const KNOX_REQUEST_STATUS_FILE = "knox_request_status.json";
 const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
 const KNOX_MISSION_INDEX_MAX = 64;
 
@@ -97,7 +99,7 @@ export class KnoxSyncEngine {
     if (this.timer) clearInterval(this.timer);
   }
 
-  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | undefined> {
+  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | undefined> {
     try {
       const value = await readJsonFile(filePath);
       const type = (value as { type?: unknown } | null)?.type;
@@ -105,6 +107,7 @@ export class KnoxSyncEngine {
       if (type === "mission_received_ack") return validateMissionReceivedAcknowledgement(value);
       if (type === 'mission_completed') return validateMissionCompleted(value);
       if (type === 'mission_declined') return validateMissionDeclined(value);
+      if (type === "mission_request") return validateMissionRequest(value);
       if (missionStateKind(type)) return validateMissionState(value);
       throw new Error("unsupported message type");
     } catch (error) {
@@ -155,6 +158,26 @@ export class KnoxSyncEngine {
         await moveQueueFile(filePath, this.paths.gameProcessed);
         this.retryState.delete(fileName);
         this.logger.log('BRIDGE->KNOX', `mission ${message.payload.missionId} declined`);
+      } catch (error) {
+        const attempts = (retry?.attempts ?? 0) + 1;
+        const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(attempts - 1, 20)), this.config.retryMaxMs);
+        this.retryState.set(fileName, { attempts, retryAt: Date.now() + delay });
+        this.logger.error(`${message.messageId} retained for retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+
+    if (message.type === "mission_request") {
+      const { requestId, requestedBy, saveId } = message.payload;
+      try {
+        if (!this.api.requestMission) throw new Error("this transport cannot request missions");
+        const answer = await this.api.requestMission(requestId, requestedBy, saveId);
+        const status: MissionRequestStatusFile = { protocolVersion: KNOX_PROTOCOL_VERSION, requestId, status: answer.status,
+          ...(answer.reason ? { reason: answer.reason } : {}), ...(answer.message ? { message: answer.message } : {}) };
+        await atomicWriteJson(path.join(this.paths.bridgePending, KNOX_REQUEST_STATUS_FILE), status);
+        await moveQueueFile(filePath, this.paths.gameProcessed);
+        this.retryState.delete(fileName);
+        this.logger.log("BRIDGE->KNOX", `mission request ${requestId} by ${requestedBy}: ${answer.status}${answer.reason ? ` (${answer.reason})` : ""}`);
       } catch (error) {
         const attempts = (retry?.attempts ?? 0) + 1;
         const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(attempts - 1, 20)), this.config.retryMaxMs);

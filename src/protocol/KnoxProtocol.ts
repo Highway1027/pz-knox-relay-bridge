@@ -147,6 +147,35 @@ export interface MissionStateMessage {
   payload: { missionId: MissionId; missionVersion: number; acceptedBy?: string; abandonedBy?: string; reason?: string; saveId?: string };
 }
 
+// "New mission" pressed in game (Connector 0.21.0, Bridge 0.2.9). requestedBy: the player's username.
+export interface MissionRequestMessage {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: string;
+  type: "mission_request";
+  createdAt: string;
+  payload: { requestId: string; requestedBy: string; saveId?: string };
+}
+
+// The backend's quick answer. The mission itself comes later on the usual pull path.
+export type MissionRequestStatus = "accepted" | "refused";
+export interface MissionRequestResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  requestId: string;
+  status: MissionRequestStatus;
+  reason?: string;
+  message?: string;
+}
+
+// Written by the Bridge to bridge-to-game/pending for the Connector (the latest answer only).
+export interface MissionRequestStatusFile {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  requestId: string;
+  status: MissionRequestStatus;
+  reason?: string;
+  message?: string;
+}
+
 // Added by the Bridge to every mission file it writes, so the Connector can link a save to one network.
 export interface MissionFileIdentity {
   networkId: string;
