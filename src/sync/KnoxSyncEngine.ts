@@ -7,10 +7,13 @@ import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile } from "../protocol/KnoxProtocol.js";
-import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, missionStateKind } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile, type MessageReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
+import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateMessageReceivedAcknowledgement, missionStateKind } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
+// Radio messages outside missions (Bridge 0.2.10): message_<id>.json plus this index, same pattern as missions.
+export const KNOX_MESSAGE_INDEX_FILE = "knox_messages.json";
+const KNOX_MESSAGE_FILE = /^message_(msg_[a-z0-9_]{1,96})\.json$/;
 export const KNOX_AUDIO_INDEX_FILE = "knox_audio.json";
 // The backend's answer to the latest "New mission" request, for the Connector (Bridge 0.2.9).
 export const KNOX_REQUEST_STATUS_FILE = "knox_request_status.json";
@@ -52,6 +55,9 @@ export class KnoxSyncEngine {
   private missionRetryAttempts = 0;
   private missionBackendOnline: boolean | undefined;
   private lastKnoxMissionIndex?: string;
+  private lastKnoxMessageIndex?: string;
+  private nextMessagePollAt = 0;
+  private messageRetryAttempts = 0;
   private nextAckPruneAt = 0;
 
   constructor(
@@ -78,9 +84,13 @@ export class KnoxSyncEngine {
       if (!this.running) return;
       await this.pollMission();
       if (!this.running) return;
+      await this.pollMessage();
+      if (!this.running) return;
       await this.pollAudio();
       if (!this.running) return;
       await this.refreshKnoxMissionIndex();
+      if (!this.running) return;
+      await this.refreshKnoxMessageIndex();
       if (!this.running) return;
       await this.pruneOldAcknowledgements();
     } finally {
@@ -99,12 +109,13 @@ export class KnoxSyncEngine {
     if (this.timer) clearInterval(this.timer);
   }
 
-  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | undefined> {
+  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | MessageReceivedAcknowledgement | undefined> {
     try {
       const value = await readJsonFile(filePath);
       const type = (value as { type?: unknown } | null)?.type;
       if (type === "connector_test") return validateConnectorTest(value);
       if (type === "mission_received_ack") return validateMissionReceivedAcknowledgement(value);
+      if (type === "message_received_ack") return validateMessageReceivedAcknowledgement(value);
       if (type === 'mission_completed') return validateMissionCompleted(value);
       if (type === 'mission_declined') return validateMissionDeclined(value);
       if (type === "mission_request") return validateMissionRequest(value);
@@ -134,6 +145,15 @@ export class KnoxSyncEngine {
       await moveQueueFile(filePath, this.paths.gameProcessed);
       this.retryState.delete(fileName);
       this.logger.log("PZ->BRIDGE", `mission ${message.payload.missionId} acknowledged`);
+      return;
+    }
+
+    if (message.type === "message_received_ack") {
+      const messageFile = path.join(this.paths.bridgePending, `message_${message.payload.messageId}.json`);
+      if (await exists(messageFile)) await moveQueueFile(messageFile, this.paths.bridgeProcessed);
+      await moveQueueFile(filePath, this.paths.gameProcessed);
+      this.retryState.delete(fileName);
+      this.logger.log("PZ->BRIDGE", `radio message ${message.payload.messageId} acknowledged`);
       return;
     }
 
@@ -338,6 +358,47 @@ export class KnoxSyncEngine {
       this.missionBackendOnline = false;
       this.logger.error(`mission sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // Radio messages outside missions (Bridge 0.2.10): one per poll, written as message_<id>.json with this
+  // connection's network id. A message already written (pending or processed) is only confirmed again.
+  private async pollMessage(): Promise<void> {
+    if (!this.config.missionSyncEndpoint || !this.api.pullMessage || !this.api.acknowledgeMessageQueued || Date.now() < this.nextMessagePollAt) return;
+    this.nextMessagePollAt = Date.now() + this.config.missionPollIntervalMs;
+    try {
+      const response = await this.api.pullMessage();
+      this.messageRetryAttempts = 0;
+      if (!response.message) return;
+      const message = response.message;
+      const fileName = `message_${message.messageId}.json`;
+      const pendingPath = path.join(this.paths.bridgePending, fileName);
+      const processedPath = path.join(this.paths.bridgeProcessed, fileName);
+      if (!(await exists(pendingPath)) && !(await exists(processedPath))) {
+        await atomicWriteJson(pendingPath, { ...message, networkId: this.config.networkId });
+        this.logger.log("BRIDGE->PZ", `radio message ${message.messageId} from ${message.sender} queued`);
+      }
+      await this.api.acknowledgeMessageQueued(message.messageId);
+      await this.refreshKnoxMessageIndex();
+    } catch (error) {
+      this.messageRetryAttempts += 1;
+      const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.messageRetryAttempts - 1, 20)), this.config.retryMaxMs);
+      this.nextMessagePollAt = Date.now() + delay;
+      this.logger.error(`message sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // PZ Lua cannot list a folder: the Connector reads the waiting message ids from this index.
+  private async refreshKnoxMessageIndex(): Promise<void> {
+    const indexPath = path.join(this.paths.bridgePending, KNOX_MESSAGE_INDEX_FILE);
+    const messageIds = (await readdir(this.paths.bridgePending))
+      .map((name) => KNOX_MESSAGE_FILE.exec(name)?.[1])
+      .filter((id): id is string => id !== undefined)
+      .sort()
+      .slice(0, KNOX_MISSION_INDEX_MAX);
+    const key = messageIds.join(",");
+    if (key === this.lastKnoxMessageIndex && await exists(indexPath)) return;
+    await atomicWriteJson(indexPath, { protocolVersion: KNOX_PROTOCOL_VERSION, messageIds });
+    this.lastKnoxMessageIndex = key;
   }
 
   private async pollAudio(): Promise<void> {

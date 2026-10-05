@@ -2,8 +2,8 @@
 // v5 - 26-09-2026 - Relay authoritative mission completion and decline state
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind, type MissionRequestResponse } from "../protocol/KnoxProtocol.js";
-import { validateAudioPullResponse, validateAudioQueuedResponse, validateMissionPullResponse, validateMissionQueuedResponse, validateMissionRequestResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind, type MissionRequestResponse, type MessagePullResponse, type MessageQueuedResponse, type RadioMessageId } from "../protocol/KnoxProtocol.js";
+import { validateAudioPullResponse, validateAudioQueuedResponse, validateMessagePullResponse, validateMessageQueuedResponse,validateMissionPullResponse, validateMissionQueuedResponse, validateMissionRequestResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
   sendConnectorTest(message: "hello from Project Zomboid"): Promise<KnoxPingResponse>;
@@ -19,6 +19,9 @@ export interface KnoxApiTransport {
   requestMission?(requestId: string, requestedBy: string, saveId?: string): Promise<MissionRequestResponse>;
   pullAudio(): Promise<AudioPullResponse>;
   acknowledgeAudioQueued(audioId: AudioId): Promise<AudioQueuedResponse>;
+  // Radio messages outside missions (Bridge 0.2.10). Optional so test transports without them still compile.
+  pullMessage?(): Promise<MessagePullResponse>;
+  acknowledgeMessageQueued?(messageId: RadioMessageId): Promise<MessageQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -104,6 +107,14 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateMissionRequestResponse(await this.missionRequest({ action: "request", requestId, requestedBy, ...(saveId ? { saveId } : {}) }), requestId);
   }
 
+  async pullMessage(): Promise<MessagePullResponse> {
+    return validateMessagePullResponse(await this.missionRequest({ action: "messages" }));
+  }
+
+  async acknowledgeMessageQueued(messageId: RadioMessageId): Promise<MessageQueuedResponse> {
+    return validateMessageQueuedResponse(await this.missionRequest({ action: "message_queued", messageId }), messageId);
+  }
+
   async pullAudio(): Promise<AudioPullResponse> {
     return validateAudioPullResponse(await this.audioRequest({ action: "pull" }));
   }
@@ -139,7 +150,7 @@ export class KnoxApiClient implements KnoxApiTransport {
     catch (error) { throw new Error(`invalid backend response: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
-  private async missionRequest(action: { action: "pull" } | { action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }
+  private async missionRequest(action: { action: "pull" | "messages" } | { action: "message_queued"; messageId: RadioMessageId } |{ action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }
     | { action: "request"; requestId: string; requestedBy: string; saveId?: string }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");

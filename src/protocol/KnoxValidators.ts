@@ -3,7 +3,7 @@
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { createHash as createSha256 } from "node:crypto";
-import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -273,4 +273,51 @@ export function validateMissionState(value: unknown): MissionStateMessage {
       (payload[field] as string).length < 1 || (payload[field] as string).length > 200)
     throw new Error("invalid mission state event");
   return message as unknown as MissionStateMessage;
+}
+
+// Radio messages outside missions (Bridge 0.2.10). The Bridge is transport only: it checks shape and
+// limits, not the kind's meaning, so a new kind from the backend needs no Bridge release.
+export const RADIO_MESSAGE_ID_PATTERN = /^msg_[a-z0-9_]{1,96}$/;
+const RADIO_MESSAGE_KIND = /^[a-z_]{1,32}$/;
+const optionalText = (value: unknown, max: number): boolean => value === null || (typeof value === "string" && value.length >= 1 && value.length <= max);
+
+export function validateRadioMessage(value: unknown): KnoxRadioMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("radio message must be an object");
+  const message = value as Record<string, unknown>;
+  if (!exactKeys(message, ["protocolVersion", "messageId", "kind", "saveId", "sender", "senderRole", "title", "text"]) || message.protocolVersion !== 1 ||
+      typeof message.messageId !== "string" || !RADIO_MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.kind !== "string" || !RADIO_MESSAGE_KIND.test(message.kind) ||
+      !(message.saveId === null || (typeof message.saveId === "string" && SAVE_ID_PATTERN.test(message.saveId))) ||
+      typeof message.sender !== "string" || message.sender.length < 1 || message.sender.length > 64 ||
+      !optionalText(message.senderRole, 40) || !optionalText(message.title, 60) ||
+      typeof message.text !== "string" || message.text.length < 1 || message.text.length > 400)
+    throw new Error("invalid radio message");
+  return message as unknown as KnoxRadioMessage;
+}
+
+export function validateMessagePullResponse(value: unknown): MessagePullResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (!exactKeys(response, ["ok", "protocolVersion", "message"]) || response.ok !== true || response.protocolVersion !== 1) throw new Error("invalid message pull response");
+  if (response.message !== null) validateRadioMessage(response.message);
+  return response as unknown as MessagePullResponse;
+}
+
+export function validateMessageQueuedResponse(value: unknown, messageId: string): MessageQueuedResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (response.ok !== true || response.protocolVersion !== 1 || response.messageId !== messageId) throw new Error("backend did not acknowledge queued message");
+  return response as unknown as MessageQueuedResponse;
+}
+
+export function validateMessageReceivedAcknowledgement(value: unknown): MessageReceivedAcknowledgement {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("message root must be an object");
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  if (!exactKeys(message, ["protocolVersion", "messageId", "type", "createdAt", "payload"]) || message.protocolVersion !== 1 ||
+      message.type !== "message_received_ack" || typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !payload || typeof payload !== "object" ||
+      Array.isArray(payload) || !exactKeys(payload, ["messageId"]) || typeof payload.messageId !== "string" || !RADIO_MESSAGE_ID_PATTERN.test(payload.messageId))
+    throw new Error("invalid message acknowledgement");
+  return message as unknown as MessageReceivedAcknowledgement;
 }
