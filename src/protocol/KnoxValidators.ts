@@ -3,7 +3,7 @@
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { createHash as createSha256 } from "node:crypto";
-import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -185,6 +185,31 @@ export function validateMissionReceivedAcknowledgement(value: unknown): MissionR
 
 // Save identity from the Connector (MISSION_API 13.9); the backend checks the same pattern.
 export const SAVE_ID_PATTERN = /^save_[a-z0-9]{1,40}$/;
+export const REQUEST_ID_PATTERN = /^req_[a-z0-9_]{1,64}$/;
+
+// "New mission" pressed in game: exactly requestId and requestedBy (1-64 characters), plus an optional saveId.
+export function validateMissionRequest(value: unknown): MissionRequestMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("message root must be an object");
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  if (!exactKeys(message, ["protocolVersion", "messageId", "type", "createdAt", "payload"]) || message.protocolVersion !== 1 ||
+      message.type !== "mission_request" || typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !payloadKeysWithSave(payload, ["requestId", "requestedBy"]) || typeof payload.requestId !== "string" || !REQUEST_ID_PATTERN.test(payload.requestId) ||
+      typeof payload.requestedBy !== "string" || payload.requestedBy.length < 1 || payload.requestedBy.length > 64)
+    throw new Error("invalid mission request");
+  return message as unknown as MissionRequestMessage;
+}
+
+export function validateMissionRequestResponse(value: unknown, requestId: string): MissionRequestResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  const text = (field: string, max: number) => !(field in response) || (typeof response[field] === "string" && (response[field] as string).length <= max);
+  if (response.ok !== true || response.protocolVersion !== 1 || response.requestId !== requestId ||
+      (response.status !== "accepted" && response.status !== "refused") || !text("reason", 40) || !text("message", 200))
+    throw new Error("backend did not answer the mission request");
+  return response as unknown as MissionRequestResponse;
+}
 
 // Exact payload keys, optionally plus a valid saveId.
 function payloadKeysWithSave(payload: Record<string, unknown>, keys: string[]): boolean {
