@@ -204,3 +204,39 @@ export interface AudioQueuedResponse {
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;
   audioId: AudioId;
 }
+
+// Radio messages outside missions (Bridge 0.2.10): the backend's knoxMissionSync actions "messages" and
+// "message_queued". The Bridge writes each one as message_<id>.json for the Connector (PROTOCOL.md).
+export type RadioMessageId = `msg_${string}`;
+
+export interface KnoxRadioMessage {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: RadioMessageId;
+  kind: string;
+  saveId: string | null;
+  sender: string;
+  senderRole: string | null;
+  title: string | null;
+  text: string;
+}
+
+export interface MessagePullResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  message: KnoxRadioMessage | null;
+}
+
+export interface MessageQueuedResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: RadioMessageId;
+}
+
+// Written by the Connector once it stored the message; the Bridge then moves the file to processed.
+export interface MessageReceivedAcknowledgement {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: string;
+  type: "message_received_ack";
+  createdAt: string;
+  payload: { messageId: RadioMessageId };
+}
