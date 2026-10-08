@@ -232,6 +232,35 @@ export interface MessageQueuedResponse {
   messageId: RadioMessageId;
 }
 
+// World history for the game's Journal window (Bridge 0.2.11): knoxMissionSync action "history" for the
+// save the telemetry names. The Bridge writes it as knox_history.json for the Connector (PROTOCOL.md).
+export interface HistoryJournalEntry {
+  id: string;
+  dayKey: string;
+  username: string;
+  characterName: string;
+  title: string;
+  text: string;
+}
+
+export interface HistoryRecap {
+  id: string;
+  startDay: string;
+  endDay: string;
+  endedAtMs: number;
+  title: string;
+  text: string;
+}
+
+export interface HistoryPullResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  saveId: string;
+  journalEnabled: boolean;
+  journal: HistoryJournalEntry[];
+  recaps: HistoryRecap[];
+}
+
 // Written by the Connector once it stored the message; the Bridge then moves the file to processed.
 export interface MessageReceivedAcknowledgement {
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;

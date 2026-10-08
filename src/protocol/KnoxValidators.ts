@@ -3,7 +3,7 @@
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { createHash as createSha256 } from "node:crypto";
-import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -301,6 +301,40 @@ export function validateMessagePullResponse(value: unknown): MessagePullResponse
   if (!exactKeys(response, ["ok", "protocolVersion", "message"]) || response.ok !== true || response.protocolVersion !== 1) throw new Error("invalid message pull response");
   if (response.message !== null) validateRadioMessage(response.message);
   return response as unknown as MessagePullResponse;
+}
+
+// World history feed (Bridge 0.2.11): the backend's limits (journal.js FEED and LIMITS) plus some room.
+export const HISTORY_LIMITS = Object.freeze({ journal: 200, recaps: 10, id: 128, name: 64, title: 80, journalText: 1600, recapText: 1200 });
+const HISTORY_ID = /^[A-Za-z0-9_-]{1,128}$/;
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+const boundedText = (value: unknown, min: number, max: number): boolean => typeof value === "string" && value.length >= min && value.length <= max;
+const dayOrEmpty = (value: unknown): boolean => value === "" || (typeof value === "string" && DAY_KEY.test(value));
+
+export function validateHistoryPullResponse(value: unknown, saveId: string): HistoryPullResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (!exactKeys(response, ["ok", "protocolVersion", "saveId", "journalEnabled", "journal", "recaps"]) || response.ok !== true ||
+      response.protocolVersion !== 1 || response.saveId !== saveId || typeof response.journalEnabled !== "boolean" ||
+      !Array.isArray(response.journal) || response.journal.length > HISTORY_LIMITS.journal ||
+      !Array.isArray(response.recaps) || response.recaps.length > HISTORY_LIMITS.recaps)
+    throw new Error("invalid history response");
+  for (const entry of response.journal as Record<string, unknown>[]) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) ||
+        !exactKeys(entry, ["id", "dayKey", "username", "characterName", "title", "text"]) ||
+        typeof entry.id !== "string" || !HISTORY_ID.test(entry.id) || typeof entry.dayKey !== "string" || !DAY_KEY.test(entry.dayKey) ||
+        !boundedText(entry.username, 1, HISTORY_LIMITS.name) || !boundedText(entry.characterName, 1, HISTORY_LIMITS.name) ||
+        !boundedText(entry.title, 0, HISTORY_LIMITS.title) || !boundedText(entry.text, 1, HISTORY_LIMITS.journalText))
+      throw new Error("invalid history journal entry");
+  }
+  for (const recap of response.recaps as Record<string, unknown>[]) {
+    if (!recap || typeof recap !== "object" || Array.isArray(recap) ||
+        !exactKeys(recap, ["id", "startDay", "endDay", "endedAtMs", "title", "text"]) ||
+        typeof recap.id !== "string" || !HISTORY_ID.test(recap.id) || !dayOrEmpty(recap.startDay) || !dayOrEmpty(recap.endDay) ||
+        typeof recap.endedAtMs !== "number" || !Number.isFinite(recap.endedAtMs) || recap.endedAtMs < 0 ||
+        !boundedText(recap.title, 0, HISTORY_LIMITS.title) || !boundedText(recap.text, 1, HISTORY_LIMITS.recapText))
+      throw new Error("invalid history recap");
+  }
+  return response as unknown as HistoryPullResponse;
 }
 
 export function validateMessageQueuedResponse(value: unknown, messageId: string): MessageQueuedResponse {
