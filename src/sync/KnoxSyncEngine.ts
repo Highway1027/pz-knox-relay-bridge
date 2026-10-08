@@ -8,12 +8,15 @@ import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueue
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
 import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile, type MessageReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
-import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateMessageReceivedAcknowledgement, missionStateKind } from "../protocol/KnoxValidators.js";
+import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateMessageReceivedAcknowledgement, missionStateKind, SAVE_ID_PATTERN } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
 // Radio messages outside missions (Bridge 0.2.10): message_<id>.json plus this index, same pattern as missions.
 export const KNOX_MESSAGE_INDEX_FILE = "knox_messages.json";
 const KNOX_MESSAGE_FILE = /^message_(msg_[a-z0-9_]{1,96})\.json$/;
+// World history for the Journal window (Bridge 0.2.11): one file, replaced as a whole.
+export const KNOX_HISTORY_FILE = "knox_history.json";
+export const KNOX_HISTORY_POLL_MS = 5 * 60 * 1000;
 export const KNOX_AUDIO_INDEX_FILE = "knox_audio.json";
 // The backend's answer to the latest "New mission" request, for the Connector (Bridge 0.2.9).
 export const KNOX_REQUEST_STATUS_FILE = "knox_request_status.json";
@@ -59,6 +62,11 @@ export class KnoxSyncEngine {
   private nextMessagePollAt = 0;
   private messageRetryAttempts = 0;
   private nextAckPruneAt = 0;
+  // World history (Bridge 0.2.11): the save the latest telemetry snapshot named, and the last file written.
+  private currentSaveId?: string;
+  private nextHistoryPollAt = 0;
+  private historyRetryAttempts = 0;
+  private lastHistoryJson?: string;
 
   constructor(
     private readonly config: KnoxBridgeConfig,
@@ -85,6 +93,8 @@ export class KnoxSyncEngine {
       await this.pollMission();
       if (!this.running) return;
       await this.pollMessage();
+      if (!this.running) return;
+      await this.pollHistory();
       if (!this.running) return;
       await this.pollAudio();
       if (!this.running) return;
@@ -273,6 +283,7 @@ export class KnoxSyncEngine {
       return;
     }
     if (message.messageId === this.lastTelemetryMessageId) return;
+    this.noteSave(message.payload.snapshot);
     if (this.telemetryRetry.messageId !== message.messageId) this.telemetryRetry = { messageId: message.messageId, attempts: 0, retryAt: 0 };
     if (this.telemetryRetry.retryAt > Date.now()) return;
     this.logger.log("PZ->BRIDGE", `${message.type} ${message.messageId} (${message.payload.players.length} players)`);
@@ -384,6 +395,40 @@ export class KnoxSyncEngine {
       const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.messageRetryAttempts - 1, 20)), this.config.retryMaxMs);
       this.nextMessagePollAt = Date.now() + delay;
       this.logger.error(`message sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // A snapshot (about once a minute) names the save being played. A new save gets its history at once.
+  private noteSave(snapshot: Record<string, unknown> | undefined): void {
+    const saveId = snapshot?.saveId;
+    if (typeof saveId !== "string" || !SAVE_ID_PATTERN.test(saveId) || saveId === this.currentSaveId) return;
+    this.currentSaveId = saveId;
+    this.nextHistoryPollAt = 0;
+    this.historyRetryAttempts = 0;
+  }
+
+  // World history for the game's Journal window (Bridge 0.2.11): the latest journal entries and recaps of
+  // the current save, written as knox_history.json. Rewritten only when it changed (or went missing).
+  private async pollHistory(): Promise<void> {
+    const saveId = this.currentSaveId;
+    if (!saveId || !this.config.missionSyncEndpoint || !this.api.pullHistory || Date.now() < this.nextHistoryPollAt) return;
+    this.nextHistoryPollAt = Date.now() + KNOX_HISTORY_POLL_MS;
+    try {
+      const response = await this.api.pullHistory(saveId);
+      this.historyRetryAttempts = 0;
+      const file = { protocolVersion: KNOX_PROTOCOL_VERSION, saveId: response.saveId, journalEnabled: response.journalEnabled,
+        journal: response.journal, recaps: response.recaps };
+      const json = JSON.stringify(file);
+      const filePath = path.join(this.paths.bridgePending, KNOX_HISTORY_FILE);
+      if (json === this.lastHistoryJson && await exists(filePath)) return;
+      await atomicWriteJson(filePath, file);
+      this.lastHistoryJson = json;
+      this.logger.log("BRIDGE->PZ", `history for ${saveId}: ${response.journal.length} journal entries, ${response.recaps.length} recaps`);
+    } catch (error) {
+      this.historyRetryAttempts += 1;
+      const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.historyRetryAttempts - 1, 20)), this.config.retryMaxMs);
+      this.nextHistoryPollAt = Date.now() + delay;
+      this.logger.error(`history sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

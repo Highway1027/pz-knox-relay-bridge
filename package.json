@@ -1,6 +1,6 @@
 {
   "name": "knox-relay-bridge",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "private": true,
   "author": "Knox Relay",
   "description": "Transport-only local bridge between Project Zomboid and Knox Relay",
