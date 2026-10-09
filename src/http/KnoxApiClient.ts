@@ -17,6 +17,8 @@ export interface KnoxApiTransport {
   reportMissionState(kind: MissionStateKind, missionId: MissionId, saveId?: string, reason?: string): Promise<MissionQueuedResponse>;
   // "New mission" pressed in game (Bridge 0.2.9). Optional so test transports without it still compile.
   requestMission?(requestId: string, requestedBy: string, saveId?: string): Promise<MissionRequestResponse>;
+  // "Write journal entry now" pressed in game (Bridge 0.2.12). Optional like requestMission.
+  requestJournal?(requestId: string, requestedBy: string, saveId: string): Promise<MissionRequestResponse>;
   pullAudio(): Promise<AudioPullResponse>;
   acknowledgeAudioQueued(audioId: AudioId): Promise<AudioQueuedResponse>;
   // Radio messages outside missions (Bridge 0.2.10). Optional so test transports without them still compile.
@@ -109,6 +111,10 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateMissionRequestResponse(await this.missionRequest({ action: "request", requestId, requestedBy, ...(saveId ? { saveId } : {}) }), requestId);
   }
 
+  async requestJournal(requestId: string, requestedBy: string, saveId: string): Promise<MissionRequestResponse> {
+    return validateMissionRequestResponse(await this.missionRequest({ action: "journal_now", requestId, requestedBy, saveId }), requestId, "journal request");
+  }
+
   async pullMessage(): Promise<MessagePullResponse> {
     return validateMessagePullResponse(await this.missionRequest({ action: "messages" }));
   }
@@ -157,7 +163,8 @@ export class KnoxApiClient implements KnoxApiTransport {
   }
 
   private async missionRequest(action: { action: "pull" | "messages" } | { action: "message_queued"; messageId: RadioMessageId } |{ action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }
-    | { action: "request"; requestId: string; requestedBy: string; saveId?: string } | { action: "history"; saveId: string }): Promise<unknown> {
+    | { action: "request"; requestId: string; requestedBy: string; saveId?: string } | { action: "history"; saveId: string }
+    | { action: "journal_now"; requestId: string; requestedBy: string; saveId: string }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");
     if (!this.config.connectorToken) throw new Error("connectorToken is not configured");

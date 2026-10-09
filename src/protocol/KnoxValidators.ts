@@ -3,7 +3,7 @@
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { createHash as createSha256 } from "node:crypto";
-import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type JournalRequestMessage, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -201,14 +201,30 @@ export function validateMissionRequest(value: unknown): MissionRequestMessage {
   return message as unknown as MissionRequestMessage;
 }
 
-export function validateMissionRequestResponse(value: unknown, requestId: string): MissionRequestResponse {
+export function validateMissionRequestResponse(value: unknown, requestId: string, what = "mission request"): MissionRequestResponse {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
   const response = value as Record<string, unknown>;
   const text = (field: string, max: number) => !(field in response) || (typeof response[field] === "string" && (response[field] as string).length <= max);
   if (response.ok !== true || response.protocolVersion !== 1 || response.requestId !== requestId ||
       (response.status !== "accepted" && response.status !== "refused") || !text("reason", 40) || !text("message", 200))
-    throw new Error("backend did not answer the mission request");
+    throw new Error(`backend did not answer the ${what}`);
   return response as unknown as MissionRequestResponse;
+}
+
+// "Write journal entry now" pressed in game: exactly requestId (jrq_...), requestedBy (1-64 characters) and saveId.
+export const JOURNAL_REQUEST_ID_PATTERN = /^jrq_[a-z0-9_]{1,64}$/;
+export function validateJournalRequest(value: unknown): JournalRequestMessage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("message root must be an object");
+  const message = value as Record<string, unknown>;
+  const payload = message.payload as Record<string, unknown>;
+  if (!exactKeys(message, ["protocolVersion", "messageId", "type", "createdAt", "payload"]) || message.protocolVersion !== 1 ||
+      message.type !== "journal_request" || typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !payload || typeof payload !== "object" || Array.isArray(payload) ||
+      !exactKeys(payload, ["requestId", "requestedBy", "saveId"]) || typeof payload.requestId !== "string" || !JOURNAL_REQUEST_ID_PATTERN.test(payload.requestId) ||
+      typeof payload.requestedBy !== "string" || payload.requestedBy.length < 1 || payload.requestedBy.length > 64 ||
+      typeof payload.saveId !== "string" || !SAVE_ID_PATTERN.test(payload.saveId))
+    throw new Error("invalid journal request");
+  return message as unknown as JournalRequestMessage;
 }
 
 // Exact payload keys, optionally plus a valid saveId.

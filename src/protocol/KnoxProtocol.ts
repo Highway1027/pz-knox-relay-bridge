@@ -176,6 +176,17 @@ export interface MissionRequestStatusFile {
   message?: string;
 }
 
+// "Write journal entry now" pressed in game (Mission Board 0.36.0, Bridge 0.2.12). requestedBy: the
+// player's username; saveId is required (the entry belongs to that save's open day). The backend answers
+// with a MissionRequestResponse; the Bridge writes it as knox_journal_status.json (MissionRequestStatusFile).
+export interface JournalRequestMessage {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: string;
+  type: "journal_request";
+  createdAt: string;
+  payload: { requestId: string; requestedBy: string; saveId: string };
+}
+
 // Added by the Bridge to every mission file it writes, so the Connector can link a save to one network.
 export interface MissionFileIdentity {
   networkId: string;

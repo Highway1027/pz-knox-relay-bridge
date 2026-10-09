@@ -7,8 +7,8 @@ import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile, type MessageReceivedAcknowledgement } from "../protocol/KnoxProtocol.js";
-import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateMessageReceivedAcknowledgement, missionStateKind, SAVE_ID_PATTERN } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile, type MessageReceivedAcknowledgement, type JournalRequestMessage } from "../protocol/KnoxProtocol.js";
+import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateJournalRequest, validateMessageReceivedAcknowledgement, missionStateKind, SAVE_ID_PATTERN } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
 // Radio messages outside missions (Bridge 0.2.10): message_<id>.json plus this index, same pattern as missions.
@@ -20,6 +20,12 @@ export const KNOX_HISTORY_POLL_MS = 5 * 60 * 1000;
 export const KNOX_AUDIO_INDEX_FILE = "knox_audio.json";
 // The backend's answer to the latest "New mission" request, for the Connector (Bridge 0.2.9).
 export const KNOX_REQUEST_STATUS_FILE = "knox_request_status.json";
+// The backend's answer to the latest "Write journal entry now" press (Bridge 0.2.12). After an accepted press
+// the history is fetched KNOX_HISTORY_FAST_POLLS times, KNOX_HISTORY_FAST_POLL_MS apart, so the entry shows
+// in game within about a minute instead of up to KNOX_HISTORY_POLL_MS later.
+export const KNOX_JOURNAL_STATUS_FILE = "knox_journal_status.json";
+export const KNOX_HISTORY_FAST_POLL_MS = 20 * 1000;
+export const KNOX_HISTORY_FAST_POLLS = 5;
 const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
 const KNOX_MISSION_INDEX_MAX = 64;
 
@@ -67,6 +73,7 @@ export class KnoxSyncEngine {
   private nextHistoryPollAt = 0;
   private historyRetryAttempts = 0;
   private lastHistoryJson?: string;
+  private historyFastPolls = 0;
 
   constructor(
     private readonly config: KnoxBridgeConfig,
@@ -119,7 +126,7 @@ export class KnoxSyncEngine {
     if (this.timer) clearInterval(this.timer);
   }
 
-  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | MessageReceivedAcknowledgement | undefined> {
+  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | JournalRequestMessage | MessageReceivedAcknowledgement | undefined> {
     try {
       const value = await readJsonFile(filePath);
       const type = (value as { type?: unknown } | null)?.type;
@@ -129,6 +136,7 @@ export class KnoxSyncEngine {
       if (type === 'mission_completed') return validateMissionCompleted(value);
       if (type === 'mission_declined') return validateMissionDeclined(value);
       if (type === "mission_request") return validateMissionRequest(value);
+      if (type === "journal_request") return validateJournalRequest(value);
       if (missionStateKind(type)) return validateMissionState(value);
       throw new Error("unsupported message type");
     } catch (error) {
@@ -208,6 +216,30 @@ export class KnoxSyncEngine {
         await moveQueueFile(filePath, this.paths.gameProcessed);
         this.retryState.delete(fileName);
         this.logger.log("BRIDGE->KNOX", `mission request ${requestId} by ${requestedBy}: ${answer.status}${answer.reason ? ` (${answer.reason})` : ""}`);
+      } catch (error) {
+        const attempts = (retry?.attempts ?? 0) + 1;
+        const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(attempts - 1, 20)), this.config.retryMaxMs);
+        this.retryState.set(fileName, { attempts, retryAt: Date.now() + delay });
+        this.logger.error(`${message.messageId} retained for retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+
+    if (message.type === "journal_request") {
+      const { requestId, requestedBy, saveId } = message.payload;
+      try {
+        if (!this.api.requestJournal) throw new Error("this transport cannot request journal entries");
+        const answer = await this.api.requestJournal(requestId, requestedBy, saveId);
+        const status: MissionRequestStatusFile = { protocolVersion: KNOX_PROTOCOL_VERSION, requestId, status: answer.status,
+          ...(answer.reason ? { reason: answer.reason } : {}), ...(answer.message ? { message: answer.message } : {}) };
+        await atomicWriteJson(path.join(this.paths.bridgePending, KNOX_JOURNAL_STATUS_FILE), status);
+        await moveQueueFile(filePath, this.paths.gameProcessed);
+        this.retryState.delete(fileName);
+        if (answer.status === "accepted") {
+          this.historyFastPolls = KNOX_HISTORY_FAST_POLLS;
+          this.nextHistoryPollAt = Math.min(this.nextHistoryPollAt, Date.now() + KNOX_HISTORY_FAST_POLL_MS);
+        }
+        this.logger.log("BRIDGE->KNOX", `journal request ${requestId} by ${requestedBy}: ${answer.status}${answer.reason ? ` (${answer.reason})` : ""}`);
       } catch (error) {
         const attempts = (retry?.attempts ?? 0) + 1;
         const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(attempts - 1, 20)), this.config.retryMaxMs);
@@ -412,7 +444,9 @@ export class KnoxSyncEngine {
   private async pollHistory(): Promise<void> {
     const saveId = this.currentSaveId;
     if (!saveId || !this.config.missionSyncEndpoint || !this.api.pullHistory || Date.now() < this.nextHistoryPollAt) return;
-    this.nextHistoryPollAt = Date.now() + KNOX_HISTORY_POLL_MS;
+    const fast = this.historyFastPolls > 0;
+    if (fast) this.historyFastPolls -= 1;
+    this.nextHistoryPollAt = Date.now() + (fast ? KNOX_HISTORY_FAST_POLL_MS : KNOX_HISTORY_POLL_MS);
     try {
       const response = await this.api.pullHistory(saveId);
       this.historyRetryAttempts = 0;
