@@ -35,6 +35,10 @@ const ACK_PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 
 const isMissionState = (message: { type: string }): message is MissionStateMessage => missionStateKind(message.type) !== undefined;
 
+// Desktop 0.3.0: the connection only sends the files of saves linked to its network (KnoxGameLink.routesTo); other
+// files wait in the folder for their network. The CLI sends everything.
+export interface KnoxSyncEngineOptions { route?: (saveId: string | undefined) => boolean }
+
 // The mission as the backend sent it, plus this connection's network id and name.
 export function withFileIdentity(mission: ConnectorMission, config: Pick<KnoxBridgeConfig, "networkId" | "connectionName">): ConnectorMission & MissionFileIdentity {
   const name = config.connectionName.trim().slice(0, 80);
@@ -78,11 +82,14 @@ export class KnoxSyncEngine {
   // The last answers per status file (newest last). 0.2.13 (Tim 10-10-2026, Mission Board sitting 1.8): two
   // players pressed within two seconds and the file held only the second answer, so the first press timed out.
   private readonly recentStatuses = new Map<string, MissionRequestStatusFile[]>();
+  private currentPoll?: Promise<void>;
+  private readonly heldReported = new Set<string>();
 
   constructor(
     private readonly config: KnoxBridgeConfig,
     private readonly logger: KnoxLogger,
     private readonly api: KnoxApiTransport = new KnoxApiClient(config),
+    private readonly options: KnoxSyncEngineOptions = {},
   ) {
     this.paths = queuePaths(config.exchangeDirectory);
   }
@@ -95,28 +102,38 @@ export class KnoxSyncEngine {
   async pollOnce(): Promise<void> {
     if (this.polling) return;
     this.polling = true;
+    const poll = this.pollStages();
+    this.currentPoll = poll;
     try {
-      const files = await listStableJsonFiles(this.paths.gamePending, this.config.stableFileAgeMs);
-      for (const filePath of files) await this.processFile(filePath);
-      if (!this.running) return;
-      await this.processTelemetrySnapshot();
-      if (!this.running) return;
-      await this.pollMission();
-      if (!this.running) return;
-      await this.pollMessage();
-      if (!this.running) return;
-      await this.pollHistory();
-      if (!this.running) return;
-      await this.pollAudio();
-      if (!this.running) return;
-      await this.refreshKnoxMissionIndex();
-      if (!this.running) return;
-      await this.refreshKnoxMessageIndex();
-      if (!this.running) return;
-      await this.pruneOldAcknowledgements();
+      await poll;
     } finally {
       this.polling = false;
+      this.currentPoll = undefined;
     }
+  }
+
+  private async pollStages(): Promise<void> {
+    const files = await listStableJsonFiles(this.paths.gamePending, this.config.stableFileAgeMs);
+    for (const filePath of files) {
+      if (!this.running) return;
+      await this.processFile(filePath);
+    }
+    if (!this.running) return;
+    await this.processTelemetrySnapshot();
+    if (!this.running) return;
+    await this.pollMission();
+    if (!this.running) return;
+    await this.pollMessage();
+    if (!this.running) return;
+    await this.pollHistory();
+    if (!this.running) return;
+    await this.pollAudio();
+    if (!this.running) return;
+    await this.refreshKnoxMissionIndex();
+    if (!this.running) return;
+    await this.refreshKnoxMessageIndex();
+    if (!this.running) return;
+    await this.pruneOldAcknowledgements();
   }
 
   start(): void {
@@ -128,6 +145,18 @@ export class KnoxSyncEngine {
   stop(): void {
     this.running = false;
     if (this.timer) clearInterval(this.timer);
+  }
+
+  // Stops after the call in flight (polling stops between stages), so a switch to another network never cuts a
+  // request off halfway.
+  async stopAndWait(): Promise<void> {
+    this.stop();
+    await this.currentPoll?.catch(() => undefined);
+  }
+
+  // The save being played, from the game heartbeat (desktop 0.3.0). Same as a snapshot naming it.
+  followSave(saveId: string | undefined): void {
+    this.noteSave(saveId ? { saveId } : undefined);
   }
 
   private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | JournalRequestMessage | MessageReceivedAcknowledgement | undefined> {
@@ -161,6 +190,14 @@ export class KnoxSyncEngine {
 
     const message = await this.readAndValidate(filePath);
     if (!message) return;
+    const fileSaveId = (message.payload as { saveId?: string }).saveId;
+    if (this.options.route && !this.options.route(fileSaveId)) {
+      if (!this.heldReported.has(fileName)) {
+        this.heldReported.add(fileName);
+        this.logger.info(`${fileName} waits: ${fileSaveId} is linked to another Knox network`);
+      }
+      return;
+    }
     if (message.type === "mission_received_ack") {
       const missionFile = path.join(this.paths.bridgePending, `mission_${message.payload.missionId}.json`);
       if (await exists(missionFile)) await moveQueueFile(missionFile, this.paths.bridgeProcessed);
@@ -210,7 +247,17 @@ export class KnoxSyncEngine {
     }
 
     if (message.type === "mission_request") {
-      const { requestId, requestedBy, saveId } = message.payload;
+      const { requestId, requestedBy, saveId, networkId } = message.payload;
+      if (networkId && networkId !== this.config.networkId) {
+        // The save belongs to another network than this connection: refused at once, never sent (Tim's test 10-10, 2.1).
+        const name = this.config.connectionName.trim() || this.config.networkId;
+        await this.writeStatus(KNOX_REQUEST_STATUS_FILE, { protocolVersion: KNOX_PROTOCOL_VERSION, requestId, status: "refused", reason: "wrong_network",
+          message: `This save belongs to another Knox network; the Bridge is on ${name}.`.slice(0, 200) });
+        await moveQueueFile(filePath, this.paths.gameProcessed);
+        this.retryState.delete(fileName);
+        this.logger.log("BRIDGE->PZ", `mission request ${requestId} refused: the save is linked to ${networkId}, this connection is ${this.config.networkId}`);
+        return;
+      }
       try {
         if (!this.api.requestMission) throw new Error("this transport cannot request missions");
         const answer = await this.api.requestMission(requestId, requestedBy, saveId);

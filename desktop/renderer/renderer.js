@@ -6,7 +6,7 @@ if (!window.knox) {
   console.error("Knox Relay Bridge preload API is unavailable");
 } else {
   const api = window.knox;
-  const state = { connections: [], statuses: new Map(), logs: new Map(), selected: null, paused: false };
+  const state = { connections: [], statuses: new Map(), logs: new Map(), selected: null, paused: false, bridge: [] };
   const $ = (id) => document.getElementById(id);
   const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
   const short = (id) => id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
@@ -25,44 +25,58 @@ if (!window.knox) {
     renderConnections(); renderDebugSelect();
   }
 
+  // Bridge 0.3.0: connections run by themselves for the save being played; no Start or Stop.
+  const runLabel = (runtime) => runtime.state === "running" ? "Active for this game" : runtime.state === "starting" ? "Starting…" : runtime.state === "stopping" ? "Stopping…" : runtime.state === "error" ? "Could not start" : "Standby";
+  const saveLabel = (bridge) => bridge.saveId ? `save ${escapeHtml(short(bridge.saveId))}` : "this save";
+  const modeLabel = (bridge) => bridge.mode === "mp" ? " (multiplayer)" : bridge.mode === "sp" ? " (singleplayer)" : "";
+  function bridgeText(bridge) {
+    const network = bridge.networkId ? (state.connections.find((item) => item.networkId === bridge.networkId)?.name ?? `network ${short(bridge.networkId)}`) : "";
+    switch (bridge.state) {
+      case "no_game_folder": return ["warn", "Project Zomboid's user folder was not found.", "Start Project Zomboid once on this account."];
+      case "idle": return ["", "Waiting for Project Zomboid.", "No web calls until a save with Knox Mission Board is loaded."];
+      case "unlinked": return ["warn", `Game running: ${saveLabel(bridge)}${modeLabel(bridge)} is not linked to a Knox network yet.`, "Pick the network in game: Mission Board window, “Link this save to”."];
+      case "no_connection": return ["warn", `Game running: ${saveLabel(bridge)} is linked to ${escapeHtml(network || "a network")}, but no connection here has it.`, "Add that network's setup text from the Knox webapp, or unlink the save in game."];
+      case "error": return ["error", `Cannot start ${escapeHtml(bridge.activeName ?? network)}.`, escapeHtml(String(bridge.lastError ?? "").split("\n")[0])];
+      case "stopped": return ["", "Bridge stopped.", ""];
+      default: return ["active", `Running ${escapeHtml(bridge.activeName ?? network)} for ${saveLabel(bridge)}${modeLabel(bridge)}.`, bridge.legacy ? "Older Mission Board without a heartbeat: update the mod for save linking." : "The Bridge follows the save: another save switches the connection by itself."];
+    }
+  }
+  function renderBridge() {
+    const bridge = state.bridge[0];
+    if (!bridge) return;
+    const [kind, title, detail] = bridgeText(bridge);
+    $("game-status").className = `panel game-status ${kind}`;
+    $("game-status").innerHTML = `${title}${detail ? `<small>${detail}</small>` : ""}`;
+  }
+
   function renderConnections() {
     const root = $("connections");
     root.innerHTML = state.connections.map((connection) => {
-      const runtime = status(connection.id); const busy = runtime.state === "starting" || runtime.state === "stopping";
+      const runtime = status(connection.id);
       const error = runtime.lastError ? `<p class="error compact-error">${escapeHtml(runtime.lastError)}</p>` : "";
-      const action = runtime.state === "running" ? "Stop" : runtime.state === "starting" ? "Starting…" : runtime.state === "stopping" ? "Stopping…" : "Start";
-      return `<article class="card ${runtime.state} ${runtime.state === "error" ? "error-state" : ""}"><div><h3>${escapeHtml(connection.name)}</h3><small>Network ${escapeHtml(short(connection.networkId))}</small><p class="status"><i class="dot"></i>${escapeHtml(phaseLabel(runtime.state))} · Backend ${escapeHtml(runtime.backend)}</p>${error}</div><div><button data-start="${connection.id}" ${busy ? "disabled" : ""}>${action}</button> <button data-open="${connection.id}">Open</button></div></article>`;
+      return `<article class="card ${runtime.state} ${runtime.state === "error" ? "error-state" : ""}"><div><h3>${escapeHtml(connection.name)}</h3><small>Network ${escapeHtml(short(connection.networkId))}</small><p class="status"><i class="dot"></i>${escapeHtml(runLabel(runtime))}${runtime.state === "running" ? ` · Backend ${escapeHtml(runtime.backend)}` : ""}</p>${error}</div><div><button data-open="${connection.id}">Open</button></div></article>`;
     }).join("");
     $("empty").hidden = state.connections.length > 0;
-    root.querySelectorAll("[data-start]").forEach((button) => { button.onclick = () => toggle(button.dataset.start); });
     root.querySelectorAll("[data-open]").forEach((button) => { button.onclick = () => openDetail(button.dataset.open); });
   }
 
-  async function toggle(id) {
-    const current = status(id); const stopping = current.state === "running";
-    state.statuses.set(id, { ...current, state: stopping ? "stopping" : "starting", lastError: stopping ? current.lastError : undefined });
-    renderConnections(); if (state.selected === id) openDetail(id);
-    try { state.statuses.set(id, stopping ? await api.stop(id) : await api.start(id)); }
-    catch (error) { state.statuses.set(id, { ...current, state: "error", lastError: error.message || String(error) }); }
-    renderConnections(); if (state.selected === id) openDetail(id);
-  }
-
   function openDetail(id) {
-    state.selected = id; const connection = state.connections.find((item) => item.id === id); const runtime = status(id); const busy = runtime.state === "starting" || runtime.state === "stopping";
+    state.selected = id; const connection = state.connections.find((item) => item.id === id); const runtime = status(id);
     show("detail");
-    const failure = runtime.lastError ? `<section class="startup-error"><h3>Cannot start</h3><pre>${escapeHtml(runtime.lastError)}</pre><p>Fix the issue, then select Start Bridge to retry.</p></section>` : "";
-    $("detail-content").innerHTML = `<p class="eyebrow">CONNECTION</p><h2>${escapeHtml(connection.name)}</h2><div class="panel"><p class="status ${runtime.state}"><i class="dot"></i>${escapeHtml(phaseLabel(runtime.state))}</p>${failure}<div class="detail-grid"><div class="metric"><span>Network ID</span>${escapeHtml(connection.networkId)}</div><div class="metric"><span>Backend</span>${escapeHtml(runtime.backend)}</div><div class="metric"><span>Exchange root</span>${escapeHtml(runtime.exchangeDirectory || connection.exchangeRootOverride || "Automatic")}</div><div class="metric"><span>Connector token</span>Configured</div><div class="metric"><span>Last telemetry</span>${ago(runtime.lastTelemetrySync)} · ${runtime.playerCount ?? "Unknown"} players</div><div class="metric"><span>Last mission sync</span>${ago(runtime.lastMissionSync)}</div></div><div class="detail-actions"><button id="detail-toggle" class="primary" ${busy ? "disabled" : ""}>${runtime.state === "running" ? "Stop Bridge" : busy ? phaseLabel(runtime.state) : "Start Bridge"}</button><button id="run-doctor">Run Doctor</button><button id="open-debug">Open Debug Console</button></div><pre id="doctor-output" class="doctor"></pre><hr><h3>Connection settings</h3><label>Name<input id="edit-name" value="${escapeHtml(connection.name)}"></label><label>Custom exchange root (optional)<input id="edit-root" value="${escapeHtml(connection.exchangeRootOverride || "")}"></label><label>Replace token (leave blank to keep configured token)<input id="edit-token" type="password"></label><div class="detail-actions"><button id="save-settings">Save settings</button><button id="remove-connection" class="danger">Remove connection</button></div></div>`;
-    $("detail-toggle").onclick = () => toggle(id);
+    const failure = runtime.lastError ? `<section class="startup-error"><h3>Cannot start</h3><pre>${escapeHtml(runtime.lastError)}</pre><p>Fix the issue; the Bridge tries again by itself within half a minute.</p></section>` : "";
+    $("detail-content").innerHTML = `<p class="eyebrow">CONNECTION</p><h2>${escapeHtml(connection.name)}</h2><div class="panel"><p class="status ${runtime.state}"><i class="dot"></i>${escapeHtml(runLabel(runtime))}</p><p>Runs by itself while a save linked to this network is loaded.</p>${failure}<div class="detail-grid"><div class="metric"><span>Network ID</span>${escapeHtml(connection.networkId)}</div><div class="metric"><span>Backend</span>${escapeHtml(runtime.backend)}</div><div class="metric"><span>Exchange root</span>${escapeHtml(runtime.exchangeDirectory || connection.exchangeRootOverride || "Automatic")}</div><div class="metric"><span>Connector token</span>Configured</div><div class="metric"><span>Last telemetry</span>${ago(runtime.lastTelemetrySync)} · ${runtime.playerCount ?? "Unknown"} players</div><div class="metric"><span>Last mission sync</span>${ago(runtime.lastMissionSync)}</div></div><div class="detail-actions"><button id="run-doctor">Run Doctor</button><button id="open-debug">Open Debug Console</button></div><pre id="doctor-output" class="doctor"></pre><hr><h3>Connection settings</h3><label>Name<input id="edit-name" value="${escapeHtml(connection.name)}"></label><label>Custom exchange root (optional)<input id="edit-root" value="${escapeHtml(connection.exchangeRootOverride || "")}"></label><label>Replace token (leave blank to keep configured token)<input id="edit-token" type="password"></label><div class="detail-actions"><button id="save-settings">Save settings</button><button id="remove-connection" class="danger">Remove connection</button></div></div>`;
     $("run-doctor").onclick = async () => { $("doctor-output").textContent = (await api.doctor(id)).join("\n"); };
     $("open-debug").onclick = () => { $("debug-connection").value = id; renderLogs(); show("debug"); };
-    $("save-settings").onclick = async () => { await api.update(id, { name: $("edit-name").value, exchangeRootOverride: $("edit-root").value }, $("edit-token").value || undefined); await refresh(); openDetail(id); };
-    $("remove-connection").onclick = async () => { if (confirm(`Remove ${connection.name}?`)) { await api.remove(id); state.selected = null; await refresh(); show("overview"); } };
+    $("save-settings").onclick = async () => { await api.update(id, { name: $("edit-name").value, exchangeRootOverride: $("edit-root").value }, $("edit-token").value || undefined); await api.connectionsChanged(); await refresh(); openDetail(id); };
+    $("remove-connection").onclick = async () => { if (confirm(`Remove ${connection.name}?`)) { await api.remove(id); await api.connectionsChanged(); state.selected = null; await refresh(); show("overview"); } };
   }
 
+  // "Bridge (game link)": what the Bridge saw of the game and which connection it ran, for every connection.
+  const BRIDGE_LOG_ID = "bridge";
   function renderDebugSelect() {
     const current = $("debug-connection").value;
-    $("debug-connection").innerHTML = state.connections.map((connection) => `<option value="${connection.id}">${escapeHtml(connection.name)}</option>`).join("");
-    if (state.connections.some((connection) => connection.id === current)) $("debug-connection").value = current;
+    $("debug-connection").innerHTML = `<option value="${BRIDGE_LOG_ID}">Bridge (game link)</option>` + state.connections.map((connection) => `<option value="${connection.id}">${escapeHtml(connection.name)}</option>`).join("");
+    if (current === BRIDGE_LOG_ID || state.connections.some((connection) => connection.id === current)) $("debug-connection").value = current;
     renderLogs();
   }
 
@@ -76,9 +90,11 @@ if (!window.knox) {
 
   api.onLog((id, event) => {
     const items = state.logs.get(id) || []; items.push(event); if (items.length > 2000) items.shift(); state.logs.set(id, items);
-    api.status(id).then((next) => { state.statuses.set(id, next); renderConnections(); if (state.selected === id && $("detail").classList.contains("active")) openDetail(id); }).catch(() => {});
+    if (id !== BRIDGE_LOG_ID) api.status(id).then((next) => { state.statuses.set(id, next); renderConnections(); if (state.selected === id && $("detail").classList.contains("active")) openDetail(id); }).catch(() => {});
     renderLogs();
   });
+  api.onBridgeStatus((statuses) => { state.bridge = statuses; renderBridge(); refresh().catch(() => {}); });
+  api.bridgeStatus().then((statuses) => { state.bridge = statuses; renderBridge(); }).catch(() => {});
   document.querySelectorAll("nav button").forEach((button) => { button.onclick = () => show(button.dataset.view); });
   $("back").onclick = () => show("overview"); $("add-button").onclick = () => $("add-dialog").showModal();
   // A setup text for a server other than the Knox Relay backend needs a second, deliberate click.
@@ -89,7 +105,7 @@ if (!window.knox) {
     try {
       $("add-error").textContent = "";
       await api.add($("setup-json").value, $("connection-name").value, allowUnknownHosts);
-      $("add-dialog").close(); $("setup-json").value = ""; $("connection-name").value = ""; resetAddDialog(); await refresh();
+      $("add-dialog").close(); $("setup-json").value = ""; $("connection-name").value = ""; resetAddDialog(); await api.connectionsChanged(); await refresh();
     } catch (error) {
       const message = String(error.message || error);
       const unknownHost = message.indexOf("UNKNOWN_HOST: ");
@@ -106,7 +122,7 @@ if (!window.knox) {
   $("pause").onclick = () => { state.paused = !state.paused; $("pause").textContent = state.paused ? "Resume" : "Pause"; renderLogs(); };
   $("clear").onclick = () => { state.logs.set($("debug-connection").value, []); renderLogs(); };
   $("copy").onclick = () => navigator.clipboard.writeText($("logs").textContent);
-  $("legacy").onclick = async () => { const found = await api.legacy(); if (!found) { $("legacy-result").textContent = "No legacy config.json found."; return; } if (confirm("Existing Knox Relay Bridge configuration found. Import as a saved connection?")) { await api.importLegacy("Imported Legacy Connection"); $("legacy-result").textContent = "Legacy config imported. The original was not changed."; await refresh(); } };
+  $("legacy").onclick = async () => { const found = await api.legacy(); if (!found) { $("legacy-result").textContent = "No legacy config.json found."; return; } if (confirm("Existing Knox Relay Bridge configuration found. Import as a saved connection?")) { await api.importLegacy("Imported Legacy Connection"); $("legacy-result").textContent = "Legacy config imported. The original was not changed."; await api.connectionsChanged(); await refresh(); } };
   async function renderVersion() {
     const info = await api.appInfo();
     const source = info.source === "update" ? `installed update (built-in ${info.builtInVersion})` : "built-in";

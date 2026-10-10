@@ -153,7 +153,9 @@ export interface MissionRequestMessage {
   messageId: string;
   type: "mission_request";
   createdAt: string;
-  payload: { requestId: string; requestedBy: string; saveId?: string };
+  // networkId (Mission Board 0.37.0): the network the save is linked to. A request for another network than the
+  // running connection is refused at once by the Bridge, never sent.
+  payload: { requestId: string; requestedBy: string; saveId?: string; networkId?: string };
 }
 
 // The backend's quick answer. The mission itself comes later on the usual pull path.

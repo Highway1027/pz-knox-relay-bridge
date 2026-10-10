@@ -9,7 +9,9 @@ Electron's main process owns connection persistence, OS-backed token encryption,
 
 The renderer checks for `window.knox` before initialization. A missing or failed preload produces a visible fatal screen instead of an apparently functional but inert interface.
 
-Closing the application stops every active engine. There is no tray/background mode in v1. Duplicate starts are rejected. A failed start remains visible as an error state.
+**The Bridge follows the game (0.3.0).** Connections have no Start or Stop button. `BridgeDirector` (one per exchange folder) looks at the game heartbeat every second and runs exactly the connection whose network the loaded save is linked to; it switches after the call in flight when another save is loaded, and runs nothing (no web calls) while no game is running. It writes `knox_bridge.json` for the game every 3 seconds. The Overview shows a status line ("Waiting for Project Zomboid", "Running <name> for save …", "not linked yet", "no connection here has it"); the Debug tab has a "Bridge (game link)" log. Rules and files: `PROTOCOL.md` "Bridge detection".
+
+Closing the application stops the running connection after its call in flight (at most 3 s) and writes `stopped` into the Bridge heartbeat. There is no tray/background mode and no start with Windows (Tim 11-10-2026). A failed start remains visible as an error state and is retried after 30 seconds.
 
 Runtime phases are Offline, Starting, Running, Error, and Stopping. Preflight logging is subscribed before token/path/filesystem checks, so failures remain associated with the selected connection in Debug. `lastError` is retained for actionable detail and a failed connection can be started again after correction.
 
@@ -104,13 +106,13 @@ For the private Mac handoff, use `release/Knox Relay Bridge Source.zip` generate
 4. Restart the app and confirm metadata persists and no token is displayed.
 5. Confirm `connections.json` has no token and `secrets.json` has no plaintext token.
 6. Add a second connection and confirm both appear independently.
-7. Start one connection with PZ's user-data root absent; verify actionable error and no fake root creation.
-8. With the PZ root present, start and stop a connection; verify duplicate start is prevented.
+7. With PZ's user-data root absent, the status line says the folder was not found; no fake root is created.
+8. With the PZ root present and no game running, the status line says "Waiting for Project Zomboid" and every connection is on standby. Load a linked save: its connection runs; load a save of another network: the connection switches.
 9. Generate local telemetry/mission activity during an approved PZ test and verify only real status/timestamps/player counts appear.
 10. Exercise Debug auto-scroll, pause/resume, clear, copy, and level filtering.
 11. Put a known token in a forced error/context and verify it appears only as `[REDACTED]`.
 12. Run Doctor from connection detail and compare it with `npm run doctor` checks.
-13. Rename, set/clear an exchange override, replace a token, and restart the connection.
+13. Rename, set/clear an exchange override and replace a token; a new connection or exchange folder is picked up within 5 seconds, a replaced token the next time the connection starts (load the save again, or restart the Bridge).
 14. Detect and import legacy `config.json`; confirm the original file is unchanged.
 15. Remove a connection and confirm both metadata and encrypted secret disappear.
 16. Close the app while a connection runs and confirm no Bridge process remains.
