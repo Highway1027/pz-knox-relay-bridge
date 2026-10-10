@@ -35,7 +35,8 @@ if (!window.knox) {
       case "no_game_folder": return ["warn", "Project Zomboid's user folder was not found.", "Start Project Zomboid once on this account."];
       case "idle": return ["", "Waiting for Project Zomboid.", "No web calls until a save with Knox Mission Board is loaded."];
       case "unlinked": return ["warn", `Game running: ${saveLabel(bridge)}${modeLabel(bridge)} is not linked to a Knox network yet.`, "Pick the network in game: Mission Board window, “Link this save to”."];
-      case "no_connection": return ["warn", `Game running: ${saveLabel(bridge)} is linked to ${escapeHtml(network || "a network")}, but no connection here has it.`, "Add that network's setup text from the Knox webapp, or unlink the save in game."];
+      case "no_connection": if (bridge.legacy && !bridge.networkId) return ["warn", "An older Knox Mission Board is running; it does not say which Knox network this save uses.", "Update Knox Mission Board to 0.37.0 or later. Until then the Bridge runs a connection only when there is just one, or one this save used before."];
+        return ["warn", `Game running: ${saveLabel(bridge)} is linked to ${escapeHtml(network || "a network")}, but no connection here has it.`, "Add that network's setup text from the Knox webapp, or unlink the save in game."];
       case "error": return ["error", `Cannot start ${escapeHtml(bridge.activeName ?? network)}.`, escapeHtml(String(bridge.lastError ?? "").split("\n")[0])];
       case "stopped": return ["", "Bridge stopped.", ""];
       default: return ["active", `Running ${escapeHtml(bridge.activeName ?? network)} for ${saveLabel(bridge)}${modeLabel(bridge)}.`, bridge.legacy ? "Older Mission Board without a heartbeat: update the mod for save linking." : "The Bridge follows the save: another save switches the connection by itself."];
