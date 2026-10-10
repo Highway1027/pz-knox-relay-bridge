@@ -24,6 +24,7 @@ export const KNOX_REQUEST_STATUS_FILE = "knox_request_status.json";
 // the history is fetched KNOX_HISTORY_FAST_POLLS times, KNOX_HISTORY_FAST_POLL_MS apart, so the entry shows
 // in game within about a minute instead of up to KNOX_HISTORY_POLL_MS later.
 export const KNOX_JOURNAL_STATUS_FILE = "knox_journal_status.json";
+export const KNOX_STATUS_RECENT = 8;
 export const KNOX_HISTORY_FAST_POLL_MS = 20 * 1000;
 export const KNOX_HISTORY_FAST_POLLS = 5;
 const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
@@ -74,6 +75,9 @@ export class KnoxSyncEngine {
   private historyRetryAttempts = 0;
   private lastHistoryJson?: string;
   private historyFastPolls = 0;
+  // The last answers per status file (newest last). 0.2.13 (Tim 10-10-2026, Mission Board sitting 1.8): two
+  // players pressed within two seconds and the file held only the second answer, so the first press timed out.
+  private readonly recentStatuses = new Map<string, MissionRequestStatusFile[]>();
 
   constructor(
     private readonly config: KnoxBridgeConfig,
@@ -212,7 +216,7 @@ export class KnoxSyncEngine {
         const answer = await this.api.requestMission(requestId, requestedBy, saveId);
         const status: MissionRequestStatusFile = { protocolVersion: KNOX_PROTOCOL_VERSION, requestId, status: answer.status,
           ...(answer.reason ? { reason: answer.reason } : {}), ...(answer.message ? { message: answer.message } : {}) };
-        await atomicWriteJson(path.join(this.paths.bridgePending, KNOX_REQUEST_STATUS_FILE), status);
+        await this.writeStatus(KNOX_REQUEST_STATUS_FILE, status);
         await moveQueueFile(filePath, this.paths.gameProcessed);
         this.retryState.delete(fileName);
         this.logger.log("BRIDGE->KNOX", `mission request ${requestId} by ${requestedBy}: ${answer.status}${answer.reason ? ` (${answer.reason})` : ""}`);
@@ -232,7 +236,7 @@ export class KnoxSyncEngine {
         const answer = await this.api.requestJournal(requestId, requestedBy, saveId);
         const status: MissionRequestStatusFile = { protocolVersion: KNOX_PROTOCOL_VERSION, requestId, status: answer.status,
           ...(answer.reason ? { reason: answer.reason } : {}), ...(answer.message ? { message: answer.message } : {}) };
-        await atomicWriteJson(path.join(this.paths.bridgePending, KNOX_JOURNAL_STATUS_FILE), status);
+        await this.writeStatus(KNOX_JOURNAL_STATUS_FILE, status);
         await moveQueueFile(filePath, this.paths.gameProcessed);
         this.retryState.delete(fileName);
         if (answer.status === "accepted") {
@@ -509,5 +513,13 @@ export class KnoxSyncEngine {
       this.nextAudioPollAt = Date.now() + delay;
       this.logger.error(`audio sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // The latest answer at the top (older Mission Boards read only that) plus the last KNOX_STATUS_RECENT answers in
+  // "recent", so each press can find its own.
+  private async writeStatus(fileName: string, status: MissionRequestStatusFile): Promise<void> {
+    const recent = [...(this.recentStatuses.get(fileName) ?? []).filter((entry) => entry.requestId !== status.requestId), status].slice(-KNOX_STATUS_RECENT);
+    this.recentStatuses.set(fileName, recent);
+    await atomicWriteJson(path.join(this.paths.bridgePending, fileName), { ...status, recent });
   }
 }

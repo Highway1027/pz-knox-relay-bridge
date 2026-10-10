@@ -165,6 +165,8 @@ export interface MissionRequestResponse {
   status: MissionRequestStatus;
   reason?: string;
   message?: string;
+  // Bridge 0.2.13: the last few answers (each without its own recent), newest last.
+  recent?: MissionRequestStatusFile[];
 }
 
 // Written by the Bridge to bridge-to-game/pending for the Connector (the latest answer only).

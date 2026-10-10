@@ -79,7 +79,8 @@ test("an accepted request is forwarded, archived and its status written for the 
     await settle();
     await engine.pollOnce();
     assert.deepEqual(api.requests, [{ requestId: "req_1790000000000_42", requestedBy: "HighKool1062", saveId: "save_abc123" }]);
-    assert.deepEqual(await statusFile(paths), { protocolVersion: 1, requestId: "req_1790000000000_42", status: "accepted" });
+    const answer = { protocolVersion: 1, requestId: "req_1790000000000_42", status: "accepted" };
+    assert.deepEqual(await statusFile(paths), { ...answer, recent: [answer] });
     assert.equal((await readdir(paths.gamePending)).length, 0);
     assert.equal((await readdir(paths.gameProcessed)).length, 1);
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }

@@ -100,7 +100,8 @@ test("an accepted press is forwarded, its status written, and the history fetche
     const pressedAt = Date.now();
     await engine.pollOnce();
     assert.deepEqual(api.requests, [{ requestId: "jrq_1790000000001_42", requestedBy: "HighKool1062", saveId: "save_abc123" }]);
-    assert.deepEqual(await statusFile(paths), { protocolVersion: 1, requestId: "jrq_1790000000001_42", status: "accepted" });
+    const answer = { protocolVersion: 1, requestId: "jrq_1790000000001_42", status: "accepted" };
+    assert.deepEqual(await statusFile(paths), { ...answer, recent: [answer] });
     assert.equal((await readdir(paths.bridgePending)).includes(KNOX_REQUEST_STATUS_FILE), false, "the mission status file is left alone");
     assert.equal((await readdir(paths.gamePending)).length, 0);
     assert.ok(nextHistoryPollAt(engine) <= pressedAt + KNOX_HISTORY_FAST_POLL_MS + 1000, "the next fetch comes within seconds");
@@ -114,6 +115,21 @@ test("an accepted press is forwarded, its status written, and the history fetche
     (engine as unknown as { nextHistoryPollAt: number }).nextHistoryPollAt = 0;
     await engine.pollOnce();
     assert.ok(nextHistoryPollAt(engine) > Date.now() + KNOX_HISTORY_POLL_MS - 5000);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("two presses close together each find their own answer in recent (Mission Board sitting 1.8)", async () => {
+  const { exchangeDirectory, paths, api, engine } = await fixture();
+  try {
+    await writeFile(path.join(paths.gamePending, "journal_request_jrq_1_1.json"), JSON.stringify(request({ requestId: "jrq_1_1", requestedBy: "HighKool1062" })));
+    await writeFile(path.join(paths.gamePending, "journal_request_jrq_2_2.json"), JSON.stringify({ ...request({ requestId: "jrq_2_2", requestedBy: "Highway1027" }), messageId: "evt_1790000000002" }));
+    await settle();
+    await engine.pollOnce();
+    await engine.pollOnce();
+    assert.equal(api.requests.length, 2);
+    const status = await statusFile(paths);
+    assert.deepEqual(status.recent.map((entry: { requestId: string }) => entry.requestId).sort(), ["jrq_1_1", "jrq_2_2"]);
+    assert.equal(status.requestId, status.recent[status.recent.length - 1].requestId, "the latest answer stays at the top");
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });
 
