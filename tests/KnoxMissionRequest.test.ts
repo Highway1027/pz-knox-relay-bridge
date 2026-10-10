@@ -116,3 +116,47 @@ test("a request is kept for retry while the backend is down", async () => {
     assert.equal((await readdir(paths.gamePending)).length, 0);
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });
+
+test("Bridge 0.3.0: a request for another network is refused at once, never sent", async () => {
+  const exchangeDirectory = await mkdtemp(path.join(os.tmpdir(), "knox-request-net-"));
+  const paths = queuePaths(exchangeDirectory);
+  await ensureQueueDirectories(paths);
+  const api = new FakeApi();
+  const config = { ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1, missionSyncEndpoint: "", networkId: "netB", connectionName: "Testing Solo Multiplayer" };
+  const engine = new KnoxSyncEngine(config, new KnoxLogger(), api);
+  try {
+    await writeFile(path.join(paths.gamePending, "mission_request_req_1790000000000_42.json"), JSON.stringify(request({ saveId: "save_abc123", networkId: "netA" })));
+    await settle();
+    await engine.pollOnce();
+    assert.deepEqual(api.requests, []);
+    const status = await statusFile(paths);
+    assert.equal(status.status, "refused"); assert.equal(status.reason, "wrong_network");
+    assert.match(status.message, /the Bridge is on Testing Solo Multiplayer/);
+    assert.equal((await readdir(paths.gamePending)).length, 0);
+    // The right network goes through as before.
+    await writeFile(path.join(paths.gamePending, "mission_request_req_1790000000001_43.json"), JSON.stringify(request({ requestId: "req_1790000000001_43", networkId: "netB" })));
+    await settle();
+    await engine.pollOnce();
+    assert.equal(api.requests.length, 1);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("Bridge 0.3.0: a file for a save on another network waits in the folder", async () => {
+  const exchangeDirectory = await mkdtemp(path.join(os.tmpdir(), "knox-request-route-"));
+  const paths = queuePaths(exchangeDirectory);
+  await ensureQueueDirectories(paths);
+  const api = new FakeApi();
+  const config = { ...DEFAULT_CONFIG, exchangeDirectory, stableFileAgeMs: 1, missionSyncEndpoint: "" };
+  let allowed = false;
+  const engine = new KnoxSyncEngine(config, new KnoxLogger(), api, { route: (saveId) => saveId !== "save_abc123" || allowed });
+  try {
+    await writeFile(path.join(paths.gamePending, "mission_request_req_1790000000000_42.json"), JSON.stringify(request({ saveId: "save_abc123" })));
+    await settle();
+    await engine.pollOnce();
+    assert.deepEqual(api.requests, []);
+    assert.equal((await readdir(paths.gamePending)).length, 1, "held, not failed or archived");
+    allowed = true;
+    await engine.pollOnce();
+    assert.equal(api.requests.length, 1);
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});

@@ -8,8 +8,14 @@ contextBridge.exposeInMainWorld("knox", {
   add: (json, name, allowUnknownHosts) => ipcRenderer.invoke("connections:add", json, name, allowUnknownHosts === true),
   update: (id, changes, token) => ipcRenderer.invoke("connections:update", id, changes, token),
   remove: (id) => ipcRenderer.invoke("connections:remove", id),
-  start: (id) => ipcRenderer.invoke("runtime:start", id),
-  stop: (id) => ipcRenderer.invoke("runtime:stop", id),
+  // Bridge 0.3.0: connections run by themselves for the save being played (BridgeDirector).
+  connectionsChanged: () => ipcRenderer.invoke("connections:changed"),
+  bridgeStatus: () => ipcRenderer.invoke("bridge:status"),
+  onBridgeStatus: (listener) => {
+    const handler = (_event, statuses) => listener(statuses);
+    ipcRenderer.on("bridge:status", handler);
+    return () => ipcRenderer.removeListener("bridge:status", handler);
+  },
   status: (id) => ipcRenderer.invoke("runtime:status", id),
   doctor: (id) => ipcRenderer.invoke("runtime:doctor", id),
   legacy: () => ipcRenderer.invoke("legacy:read"),
