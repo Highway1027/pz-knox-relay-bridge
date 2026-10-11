@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
-import { access, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,15 @@ async function entries(directory) {
   try { return await readdir(directory, { withFileTypes: true }); }
   catch (error) { if (error.code === 'ENOENT') return []; throw error; }
 }
+// Bridge 0.3.0 writes its heartbeat (and a saveId -> network map once it saw a game), and a running connection writes the
+// mission and message indexes (pending starts empty, see assertIdleExchange): removed after every launch.
+const BRIDGE_FILES = ['bridge-to-game/pending/knox_bridge.json', 'game-to-bridge/telemetry/heartbeat.json', 'state/save-networks.json',
+  'bridge-to-game/pending/knox_missions.json', 'bridge-to-game/pending/knox_messages.json'];
+async function removeBridgeFiles() {
+  for (const relative of BRIDGE_FILES) await rm(path.join(exchangeRoot, relative), { force: true });
+}
 async function assertIdleExchange() {
+  await removeBridgeFiles();
   for (const folder of ['game-to-bridge/pending', 'game-to-bridge/telemetry', 'bridge-to-game/pending']) {
     assert.equal((await entries(path.join(exchangeRoot, folder))).length, 0, `${folder} is not empty; preserve it and use the manual checklist.`);
   }
@@ -133,7 +141,7 @@ try {
   await launch('add-and-close', async ({ setup, secondRoot }) => {
     const until = async (test) => { for (let i = 0; i < 120; i++) { if (await test()) return; await new Promise((r) => setTimeout(r, 50)); } throw new Error('UI wait timed out'); };
     const require = (value, message) => { if (!value) throw new Error(message); };
-    const methods = ['list', 'add', 'update', 'remove', 'start', 'stop', 'status', 'doctor', 'legacy', 'importLegacy', 'onLog'];
+    const methods = ['list', 'add', 'update', 'remove', 'connectionsChanged', 'bridgeStatus', 'onBridgeStatus', 'status', 'doctor', 'legacy', 'importLegacy', 'onLog'];
     await until(() => window.knox && document.getElementById('add-button'));
     require(methods.every((method) => typeof window.knox[method] === 'function'), 'Preload API incomplete');
     require(typeof window.require === 'undefined' && typeof window.process === 'undefined', 'Renderer Node isolation failed');
@@ -162,41 +170,57 @@ try {
   assert.ok(!JSON.stringify(saved).includes(token) && !secrets.includes(token), 'No plaintext test token on disk');
   const ids = saved.connections.map((item) => item.id);
   await assertIdleExchange();
-  await launch('reopen-start-stop-restart-close-running', async ({ exchangeRoot }) => {
-    const until = async (test) => { for (let i = 0; i < 200; i++) { if (await test()) return; await new Promise((r) => setTimeout(r, 50)); } throw new Error('Runtime UI wait timed out'); };
-    const require = (value, message) => { if (!value) throw new Error(message); };
-    await until(() => document.querySelectorAll('[data-open]').length === 2);
-    const connection = (await window.knox.list())[0];
-    require(connection.name === 'Ally Persistence Smoke', 'Settings did not persist');
-    require(!connection.exchangeRootOverride, 'Automatic path was overridden');
-    document.querySelector('[data-open]').click();
-    document.getElementById('detail-toggle').click();
-    await until(() => document.querySelector('#detail-content .status')?.textContent === 'Running');
-    require((await window.knox.status(connection.id)).exchangeDirectory === exchangeRoot, 'Wrong automatic exchange root');
-    document.getElementById('open-debug').click();
-    await until(() => document.getElementById('logs').textContent.includes('retry in'));
-    const logs = document.getElementById('logs').textContent;
-    for (const expected of ['Starting desktop', exchangeRoot, 'source: automatic', 'Watching', 'connection started', 'mission sync OFFLINE', 'HTTP 503']) require(logs.includes(expected), `Missing Debug entry: ${expected}`);
-    document.querySelector('[data-view="overview"]').click(); document.querySelector('[data-open]').click();
-    document.getElementById('run-doctor').click();
-    await until(() => document.getElementById('doctor-output').textContent.includes('Knox Relay Bridge Doctor'));
-    const doctor = document.getElementById('doctor-output').textContent;
-    require(!doctor.includes('FAIL'), doctor);
-    document.getElementById('detail-toggle').click();
-    await until(() => document.querySelector('#detail-content .status')?.textContent === 'Offline');
-    document.getElementById('detail-toggle').click();
-    await until(() => document.querySelector('#detail-content .status')?.textContent === 'Running');
-    return { persisted: true, automaticPath: true, running: true, stop: true, restart: true, closeWhileRunning: true, doctor, debug: logs };
-  });
+  // A game heartbeat as Mission Board 0.37.0 writes it, every second while the phase runs (fresh for 15 s).
+  const heartbeatPath = path.join(exchangeRoot, 'game-to-bridge', 'telemetry', 'heartbeat.json');
+  let beating = true; let beatCount = 0;
+  const beatLoop = (async () => {
+    while (beating) {
+      await writeFile(heartbeatPath, JSON.stringify({ protocolVersion: 1, beat: ++beatCount, saveId: 'save_packagedsmoke', mode: 'sp', networkId: setup.networkId, boardVersion: '0.37.0' }));
+      await delay(1000);
+    }
+  })();
+  try {
+    await launch('reopen-follow-game-close-running', async ({ exchangeRoot }) => {
+      const until = async (test) => { for (let i = 0; i < 400; i++) { if (await test()) return; await new Promise((r) => setTimeout(r, 50)); } throw new Error('Runtime UI wait timed out'); };
+      const require = (value, message) => { if (!value) throw new Error(message); };
+      await until(() => document.querySelectorAll('[data-open]').length === 2);
+      const connection = (await window.knox.list())[0];
+      require(connection.name === 'Ally Persistence Smoke', 'Settings did not persist');
+      require(!connection.exchangeRootOverride, 'Automatic path was overridden');
+      await until(() => document.getElementById('game-status')?.textContent.includes('Running Ally Persistence Smoke'));
+      require((await window.knox.status(connection.id)).state === 'running', 'The game heartbeat did not start the connection');
+      require((await window.knox.status(connection.id)).exchangeDirectory === exchangeRoot, 'Wrong automatic exchange root');
+      document.querySelector('[data-open]').click();
+      document.getElementById('open-debug').click();
+      await until(() => document.getElementById('logs').textContent.includes('retry in'));
+      const logs = document.getElementById('logs').textContent;
+      for (const expected of ['Starting desktop', exchangeRoot, 'source: automatic', 'Watching', 'connection started', 'mission sync OFFLINE', 'HTTP 503']) require(logs.includes(expected), `Missing Debug entry: ${expected}`);
+      document.getElementById('debug-connection').value = 'bridge'; document.getElementById('debug-connection').dispatchEvent(new Event('change'));
+      await until(() => document.getElementById('logs').textContent.includes('Running Ally Persistence Smoke'));
+      document.querySelector('[data-view="overview"]').click(); document.querySelector('[data-open]').click();
+      document.getElementById('run-doctor').click();
+      await until(() => document.getElementById('doctor-output').textContent.includes('Knox Relay Bridge Doctor'));
+      const doctor = document.getElementById('doctor-output').textContent;
+      require(!doctor.includes('FAIL'), doctor);
+      return { persisted: true, automaticPath: true, followsGame: true, bridgeLog: true, closeWhileRunning: true, doctor, debug: logs };
+    });
+  } finally { beating = false; await beatLoop; await rm(heartbeatPath, { force: true }); }
+  const bridgeBeat = JSON.parse(await readFile(path.join(exchangeRoot, 'bridge-to-game', 'pending', 'knox_bridge.json'), 'utf8'));
+  assert.equal(bridgeBeat.state, 'stopped', 'Closing the Bridge must tell the game at once');
+  await removeBridgeFiles();
   await launch('reopen-after-running-close', async () => {
     const until = async (test) => { for (let i = 0; i < 120; i++) { if (await test()) return; await new Promise((r) => setTimeout(r, 50)); } throw new Error('Reopen wait timed out'); };
     await until(() => document.querySelectorAll('[data-open]').length === 2);
     const connections = await window.knox.list();
-    for (const connection of connections) if ((await window.knox.status(connection.id)).state !== 'offline') throw new Error('Unexpected runtime after reopen');
-    return { connections: connections.length, offlineAfterReopen: true };
+    // No game heartbeat: every connection stays on standby, no web calls.
+    await new Promise((r) => setTimeout(r, 2500));
+    for (const connection of connections) if ((await window.knox.status(connection.id)).state !== 'offline') throw new Error('Unexpected runtime without a game');
+    if (!document.getElementById('game-status').textContent.includes('Waiting for Project Zomboid')) throw new Error('Idle status missing');
+    return { connections: connections.length, idleWithoutGame: true };
   });
   assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'connections.json'), 'utf8')).connections.map((item) => item.id), ids);
   for (const folder of ['game-to-bridge/pending', 'game-to-bridge/processed', 'game-to-bridge/failed', 'game-to-bridge/telemetry', 'bridge-to-game/pending', 'bridge-to-game/processed', 'state']) assert.ok((await stat(path.join(exchangeRoot, folder))).isDirectory());
+  await removeBridgeFiles();
   assert.deepEqual(await snapshot(exchangeRoot), before, 'Existing exchange files must remain unchanged');
   assert.ok(requests > 0, 'Runtime must actually contact the local outage fixture');
   report.ok = true;

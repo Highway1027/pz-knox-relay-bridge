@@ -142,7 +142,7 @@ For a repeatable Windows packaged UI check on a machine with an existing, idle P
 node scripts/smoke-packaged.mjs --real-pz
 ```
 
-This developer-only test launches the packaged EXE three times with an isolated encrypted profile, removes Node/npm from the child PATH, and exercises Add Connection, persistence, navigation, settings, automatic exchange detection, Start/Stop/restart, Debug, Doctor, and close while Running. It uses a local HTTP outage fixture, refuses nonempty live pending/telemetry folders, and verifies existing exchange files are unchanged. Close PZ, Java servers, and other Bridge instances first. Reports are saved under ignored `temp/packaged-smoke-*/`. It never starts PZ and does not prove production authentication or gameplay.
+This developer-only test launches the packaged EXE three times with an isolated encrypted profile, removes Node/npm from the child PATH, and exercises Add Connection, persistence, navigation, settings, automatic exchange detection, following a game (a fake game heartbeat starts the connection; without it every connection stays on standby), Debug, Doctor, and close while running (the Bridge heartbeat then says `stopped`). The Bridge's own files (`knox_bridge.json`, `state/save-networks.json`) are removed after each launch. It uses a local HTTP outage fixture, refuses nonempty live pending/telemetry folders, and verifies existing exchange files are unchanged. Close PZ, Java servers, and other Bridge instances first. Reports are saved under ignored `temp/packaged-smoke-*/`. It never starts PZ and does not prove production authentication or gameplay.
 
 See `docs/DESKTOP.md` for lifecycle, security, pairing, and manual-test details.
 

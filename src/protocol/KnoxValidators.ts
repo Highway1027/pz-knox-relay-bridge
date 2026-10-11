@@ -187,8 +187,23 @@ export function validateMissionReceivedAcknowledgement(value: unknown): MissionR
 export const SAVE_ID_PATTERN = /^save_[a-z0-9]{1,40}$/;
 export const REQUEST_ID_PATTERN = /^req_[a-z0-9_]{1,64}$/;
 
-// "New mission" pressed in game: exactly requestId and requestedBy (1-64 characters), plus an optional saveId.
+// Knox network ids (Firestore document ids of knoxRelayFiles).
+export const NETWORK_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+
+// "New mission" pressed in game: exactly requestId and requestedBy (1-64 characters), plus an optional saveId
+// and (Mission Board 0.37.0, Bridge 0.3.0) the network the save is linked to.
 export function validateMissionRequest(value: unknown): MissionRequestMessage {
+  const payload = (value as { payload?: unknown } | null)?.payload;
+  if (payload && typeof payload === "object" && !Array.isArray(payload) && "networkId" in payload) {
+    const { networkId, ...rest } = payload as Record<string, unknown>;
+    if (typeof networkId !== "string" || !NETWORK_ID_PATTERN.test(networkId)) throw new Error("invalid mission request");
+    const message = validateMissionRequestWithoutNetwork({ ...(value as Record<string, unknown>), payload: rest });
+    return { ...message, payload: { ...message.payload, networkId } };
+  }
+  return validateMissionRequestWithoutNetwork(value);
+}
+
+function validateMissionRequestWithoutNetwork(value: unknown): MissionRequestMessage {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("message root must be an object");
   const message = value as Record<string, unknown>;
   const payload = message.payload as Record<string, unknown>;

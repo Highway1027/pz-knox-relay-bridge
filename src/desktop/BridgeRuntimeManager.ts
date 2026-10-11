@@ -4,7 +4,7 @@
 import { DEFAULT_CONFIG, resolveExchangeDirectory, type KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { doctorLines, validateExchangeParent } from "../diagnostics/KnoxDiagnostics.js";
 import { KnoxLogger, type KnoxLogEvent } from "../logging/KnoxLogger.js";
-import { KnoxSyncEngine } from "../sync/KnoxSyncEngine.js";
+import { KnoxSyncEngine, type KnoxSyncEngineOptions } from "../sync/KnoxSyncEngine.js";
 import type { ConnectionStore } from "./ConnectionStore.js";
 import { assertSecureEndpoint, type ConnectionMetadata } from "./ConnectionTypes.js";
 
@@ -28,7 +28,7 @@ export class BridgeRuntimeManager {
     const token = await this.store.token(connection.id); const exchange = resolveExchangeDirectory(connection.exchangeRootOverride ? { exchangeRoot: connection.exchangeRootOverride } : {});
     return { ...DEFAULT_CONFIG, networkId: connection.networkId, connectionName: connection.name, connectorToken: token, telemetryEndpoint: connection.telemetryEndpoint, missionSyncEndpoint: connection.missionSyncEndpoint, syncEndpoint: connection.syncEndpoint ?? DEFAULT_CONFIG.syncEndpoint, exchangeDirectory: exchange.directory, exchangeDirectorySource: exchange.source };
   }
-  async start(connection: ConnectionMetadata): Promise<ConnectionRuntimeState> {
+  async start(connection: ConnectionMetadata, options: KnoxSyncEngineOptions = {}): Promise<ConnectionRuntimeState> {
     const existing = this.active.get(connection.id);
     if (existing?.state.state === "running" || existing?.state.state === "starting" || existing?.state.state === "stopping") throw new Error("Connection is already running or transitioning");
     if (existing) this.active.delete(connection.id);
@@ -44,7 +44,7 @@ export class BridgeRuntimeManager {
     try {
       const config = await this.config(connection); logger.addSecret(config.connectorToken);
       await this.preflight(config); if (runtime.stopped) return { ...state };
-      const engine = new KnoxSyncEngine(config, logger); runtime.engine = engine;
+      const engine = new KnoxSyncEngine(config, logger, undefined, options); runtime.engine = engine;
       await engine.initialize(); if (runtime.stopped) { engine.stop(); return { ...state }; }
       engine.start(); state.state = "running"; delete state.lastError; logger.info("Desktop Bridge connection started");
     } catch (error) {
@@ -59,6 +59,14 @@ export class BridgeRuntimeManager {
     runtime.stopped = true; runtime.state.state = "stopping"; runtime.engine?.stop(); runtime.logger.info("Desktop Bridge connection stopped");
     this.active.delete(id); return { connectionId: id, state: "offline", backend: "unknown", exchangeDirectory: runtime.state.exchangeDirectory };
   }
+  // Desktop 0.3.0 (BridgeDirector): stop after the call in flight, so a switch never cuts a request off halfway.
+  async stopAndWait(id: string): Promise<void> {
+    const engine = this.active.get(id)?.engine;
+    this.stop(id);
+    await engine?.stopAndWait();
+  }
+  followSave(id: string, saveId: string | undefined): void { this.active.get(id)?.engine?.followSave(saveId); }
+  logger(id: string): KnoxLogger | undefined { return this.active.get(id)?.logger; }
   stopAll(): void { for (const id of [...this.active.keys()]) this.stop(id); }
   async doctor(connection: ConnectionMetadata): Promise<string[]> { return doctorLines(await this.config(connection)); }
   private observe(state: ConnectionRuntimeState, event: KnoxLogEvent): void {

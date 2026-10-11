@@ -6,7 +6,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-const expectedMethods = ["list", "add", "update", "remove", "start", "stop", "status", "doctor", "legacy", "importLegacy", "onLog"];
+const expectedMethods = ["list", "add", "update", "remove", "connectionsChanged", "bridgeStatus", "onBridgeStatus", "status", "doctor", "legacy", "importLegacy", "onLog"];
 
 test("desktop preload is CommonJS, exists, and exposes the renderer API contract", async () => {
   const preloadPath = path.resolve("desktop", "preload.cjs");
