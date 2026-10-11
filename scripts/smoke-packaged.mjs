@@ -154,10 +154,11 @@ try {
       document.getElementById('save-connection').click();
       await until(() => document.querySelectorAll('[data-open]').length === index + 1);
     }
-    for (const view of ['debug', 'settings', 'overview']) {
+    for (const view of ['settings', 'overview']) {
       document.querySelector(`[data-view="${view}"]`).click();
       require(document.getElementById(view).classList.contains('active'), `${view} failed`);
     }
+    require(document.getElementById('debug').closest('#settings'), 'Debug must be a section of Settings');
     document.querySelector('[data-open]').click();
     document.getElementById('edit-name').value = 'Ally Persistence Smoke';
     document.getElementById('save-settings').click();
@@ -197,7 +198,9 @@ try {
       for (const expected of ['Starting desktop', exchangeRoot, 'source: automatic', 'Watching', 'connection started', 'mission sync OFFLINE', 'HTTP 503']) require(logs.includes(expected), `Missing Debug entry: ${expected}`);
       document.getElementById('debug-connection').value = 'bridge'; document.getElementById('debug-connection').dispatchEvent(new Event('change'));
       await until(() => document.getElementById('logs').textContent.includes('Running Ally Persistence Smoke'));
-      document.querySelector('[data-view="overview"]').click(); document.querySelector('[data-open]').click();
+      document.querySelector('[data-view="overview"]').click(); document.querySelector('[data-open]').click(); document.getElementById('open-debug').click();
+      require(document.getElementById('settings').classList.contains('active'), 'Debug button did not open Settings');
+      require(document.getElementById('debug-network').textContent.includes(connection.networkId), 'Network id missing from Debug');
       document.getElementById('run-doctor').click();
       await until(() => document.getElementById('doctor-output').textContent.includes('Knox Relay Bridge Doctor'));
       const doctor = document.getElementById('doctor-output').textContent;

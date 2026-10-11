@@ -140,7 +140,7 @@ function registerIpc(): void {
   ipcMain.handle("legacy:import", async (_event, name: string) => { const raw = await legacy(); if (!raw) throw new Error("Legacy config.json was not found"); return store.add(parseConnectionImport({ telemetryEndpoint: DEFAULT_CONFIG.telemetryEndpoint, missionSyncEndpoint: DEFAULT_CONFIG.missionSyncEndpoint, ...raw }), name); });
 }
 async function createWindow(): Promise<void> {
-  window = new BrowserWindow({ width: 980, height: 720, minWidth: 760, minHeight: 560, backgroundColor: "#101418", webPreferences: { preload: path.join(codeRoot, "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  window = new BrowserWindow({ width: 640, height: 540, minWidth: 520, minHeight: 420, backgroundColor: "#101418", webPreferences: { preload: path.join(codeRoot, "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   // The window only ever shows the Bridge's own pages: no new windows, no navigating away.
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => { event.preventDefault(); });
