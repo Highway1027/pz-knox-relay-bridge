@@ -48,6 +48,22 @@ test("renderer presents startup transitions and retained errors", async () => {
   assert.match(renderer, /Starting…/); assert.match(renderer, /Stopping…/); assert.match(renderer, /runtime\.lastError/); assert.match(renderer, /Cannot start/);
 });
 
+test("compact window: no tabs, a cog per connection, Debug inside Settings, every setting explained", async () => {
+  const html = await readFile(path.resolve("desktop", "renderer", "index.html"), "utf8");
+  const renderer = await readFile(path.resolve("desktop", "renderer", "renderer.js"), "utf8");
+  const main = await readFile(path.resolve("src", "desktop", "main.ts"), "utf8");
+  assert.doesNotMatch(html, /<nav>/, "the tab bar is gone");
+  assert.match(html, /id="settings-button"[^>]*data-view="settings"/);
+  const settings = html.slice(html.indexOf('<section id="settings"'));
+  assert.ok(settings.indexOf('id="debug"') > settings.indexOf("Version and updates"), "Debug is the last section of Settings");
+  assert.doesNotMatch(renderer, /Network \$\{escapeHtml\(short\(connection\.networkId\)\)\}/, "no network id on the start screen");
+  assert.match(renderer, /data-open="\$\{connection\.id\}"[^`]*⚙/, "each connection row has a cog");
+  for (const field of ["edit-name", "edit-root", "edit-token"]) assert.match(renderer, new RegExp(`<label title="[^"]+">[^<]*(<span class="hint">[^<]*</span>)?<input id="${field}"`), `${field} has a tooltip`);
+  assert.match(renderer, /OK_NOTICE_MS = 3000/, "up-to-date notice closes sooner");
+  assert.match(renderer, /showNotice\("ready", [\s\S]*?, false\)/, "the restart notice stays");
+  assert.match(main, /width: 640, height: 540/);
+});
+
 test("hidden elements stay hidden even when a class sets display", async () => {
   // Regression: .update-banner{display:flex} overrode [hidden], so the banner showed empty and × could not close it.
   const css = await readFile(path.resolve("desktop", "renderer", "styles.css"), "utf8");
