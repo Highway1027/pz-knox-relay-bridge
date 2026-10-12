@@ -8,7 +8,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { atomicWriteJson, ensureQueueDirectories, queuePaths } from "../files/KnoxQueue.js";
 import { SAVE_ID_PATTERN } from "../protocol/KnoxValidators.js";
-import type { KnoxSyncEngineOptions } from "../sync/KnoxSyncEngine.js";
+import type { GameEndResult, KnoxSyncEngineOptions } from "../sync/KnoxSyncEngine.js";
 import {
   BRIDGE_BEAT_MS, BRIDGE_HEARTBEAT_FILE, GAME_FRESH_MS, GAME_HEARTBEAT_FILE, LEGACY_TELEMETRY_FRESH_MS, SAVE_NETWORKS_FILE,
   bridgeHeartbeat, decideLink, parseGameHeartbeat, parseSaveNetworks, rememberSave, routesTo,
@@ -23,8 +23,8 @@ export const START_RETRY_MS = 30_000;
 
 export interface DirectorRunner {
   start(connection: ConnectionMetadata, options: KnoxSyncEngineOptions): Promise<ConnectionRuntimeState>;
-  // gameEndedSaveId (0.3.2): after stopping, tell the backend the game of this save stopped.
-  stopAndWait(id: string, gameEndedSaveId?: string): Promise<void>;
+  // gameEndedSaveId (0.3.2): after stopping, tell the backend the game of this save stopped. 0.3.3: with the result.
+  stopAndWait(id: string, gameEndedSaveId?: string): Promise<GameEndResult | undefined | void>;
   followSave(id: string, saveId: string | undefined): void;
   // The running connection tells the backend the game of this save stopped (another save of the same network loaded).
   reportGameEnded?(id: string, saveId: string): Promise<void>;
@@ -40,6 +40,8 @@ export interface DirectorStatus {
   activeConnectionId?: string;
   activeName?: string;
   lastError?: string;
+  // Desktop 0.3.3: while idle after a game ran here: was everything sent (the window says "safe to close").
+  lastGame?: GameEndResult & { endedAt: number };
 }
 
 export interface DirectorOptions {
@@ -78,6 +80,7 @@ export class BridgeDirector {
   private activeId?: string;
   private activeName?: string;
   private startError?: { id: string; message: string; retryAt: number };
+  private lastGame?: GameEndResult & { endedAt: number };
   private beat = 0;
   private lastBeatAt = 0;
   private lastBeatKey = "";
@@ -141,9 +144,11 @@ export class BridgeDirector {
 
     const target = decision.state === "active" ? metadata.find((item) => item.id === decision.connection?.id) : undefined;
     const ended = gameEnded(previous, decision);
+    if (decision.state !== "idle") this.lastGame = undefined;
     if (this.activeId && this.activeId !== target?.id) {
       this.log("INFO", `Stopping ${this.activeName ?? "the running connection"} after the call in flight`);
-      await this.options.runner.stopAndWait(this.activeId, ended);
+      const result = await this.options.runner.stopAndWait(this.activeId, ended);
+      if (result && decision.state === "idle") this.lastGame = { ...result, endedAt: now };
       this.activeId = undefined;
       this.activeName = undefined;
     } else if (this.activeId && ended) {
@@ -159,6 +164,7 @@ export class BridgeDirector {
       ...(decision.saveId ? { saveId: decision.saveId } : {}), ...(decision.networkId ? { networkId: decision.networkId } : {}),
       ...(sighting.kind === "heartbeat" ? { mode: sighting.heartbeat.mode } : {}), ...(decision.legacy ? { legacy: true } : {}),
       ...(this.activeId ? { activeConnectionId: this.activeId, activeName: this.activeName } : {}), ...(error ? { lastError: error } : {}),
+      ...(this.lastGame && decision.state === "idle" ? { lastGame: { ...this.lastGame } } : {}),
     });
   }
 
