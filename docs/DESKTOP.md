@@ -11,6 +11,8 @@ The renderer checks for `window.knox` before initialization. A missing or failed
 
 **The Bridge follows the game (0.3.0).** Connections have no Start or Stop button. `BridgeDirector` (one per exchange folder) looks at the game heartbeat every second and runs exactly the connection whose network the loaded save is linked to; it switches after the call in flight when another save is loaded, and runs nothing (no web calls) while no game is running. It writes `knox_bridge.json` for the game every 3 seconds. The Overview shows a status line ("Waiting for Project Zomboid", "Running <name> for save …", "not linked yet", "no connection here has it"); the Debug tab has a "Bridge (game link)" log. Rules and files: `PROTOCOL.md` "Bridge detection".
 
+The window fits the page it shows (Bridge 0.3.2): the renderer reports the page height and main sizes the window between 240 content pixels and the screen (a longer page scrolls), moving it up when it would leave the screen. Once the player resizes the window by hand it keeps that size for the rest of the run.
+
 Closing the application stops the running connection after its call in flight (at most 3 s) and writes `stopped` into the Bridge heartbeat. There is no tray/background mode and no start with Windows (Tim 11-10-2026). A failed start remains visible as an error state and is retried after 30 seconds.
 
 Runtime phases are Offline, Starting, Running, Error, and Stopping. Preflight logging is subscribed before token/path/filesystem checks, so failures remain associated with the selected connection in Debug. `lastError` is retained for actionable detail and a failed connection can be started again after correction.

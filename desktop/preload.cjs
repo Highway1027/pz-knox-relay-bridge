@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("knox", {
   // Bridge 0.3.0: connections run by themselves for the save being played (BridgeDirector).
   connectionsChanged: () => ipcRenderer.invoke("connections:changed"),
   bridgeStatus: () => ipcRenderer.invoke("bridge:status"),
+  // Bridge 0.3.2: ask for a window this tall (content pixels); main clamps it and ignores it after a manual resize.
+  fitHeight: (height) => ipcRenderer.invoke("window:fit", height),
   onBridgeStatus: (listener) => {
     const handler = (_event, statuses) => listener(statuses);
     ipcRenderer.on("bridge:status", handler);

@@ -1,7 +1,7 @@
 // src/desktop/main.ts
 // v7 - 27-09-2026 - Security: unknown-backend confirmation, ZIP guard for manual installs, navigation guards
 
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, screen } from "electron";
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import { writeFile } from "node:fs/promises";
@@ -13,6 +13,7 @@ import { DEFAULT_CONFIG, automaticPzDirectory, resolveExchangeDirectory } from "
 import { BridgeDirector, type DirectorStatus } from "./BridgeDirector.js";
 import { stat } from "node:fs/promises";
 import { AutoUpdater, type CheckResult } from "./AutoUpdater.js";
+import { MIN_CONTENT_HEIGHT, fittedContentHeight, keptOnScreen } from "./WindowFit.js";
 
 // Set by desktop/launcher.cjs. Absent when main.js is started directly (npm run desktop without the launcher).
 type Launcher = { apiVersion: number; codeRoot: string; version: string; source: "built-in" | "update"; builtInVersion: string; notes: string[];
@@ -21,6 +22,20 @@ const launcher = (globalThis as { knoxLauncher?: Launcher }).knoxLauncher;
 // The UI (preload + renderer) comes from the same code root as this file, so updates can change it too.
 const codeRoot = launcher?.codeRoot ?? app.getAppPath();
 let window: BrowserWindow | undefined;
+// Bridge 0.3.2: the window fits the page it shows (WindowFit) until the player resizes it by hand.
+let resizedByHand = false;
+function fitWindow(wanted: number): boolean {
+  const target = window;
+  if (!target || target.isDestroyed() || resizedByHand || target.isMaximized() || target.isFullScreen() || typeof wanted !== "number") return false;
+  const area = screen.getDisplayMatching(target.getBounds()).workArea;
+  const [width, current] = target.getContentSize() as [number, number];
+  const height = fittedContentHeight(wanted, area, target.getBounds().height - current);
+  if (height === current) return false;
+  target.setContentSize(width, height);
+  const place = keptOnScreen(target.getBounds(), area);
+  target.setPosition(place.x, place.y);
+  return true;
+}
 const UPDATE_FIRST_CHECK_MS = 3000;
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let updater: AutoUpdater | undefined; let lastUpdate: (CheckResult & { checkedAt: string }) | undefined;
@@ -117,6 +132,7 @@ function registerIpc(): void {
   ipcMain.handle("connections:remove", async (_event, id: string) => { await store.remove(id); });
   ipcMain.handle("connections:changed", async () => { await refreshDirectors(); return bridgeStatuses(); });
   ipcMain.handle("bridge:status", () => bridgeStatuses());
+  ipcMain.handle("window:fit", (_event, height: number) => fitWindow(height));
   ipcMain.handle("runtime:status", async (_event, id: string) => runtime.describe(await connection(id)));
   ipcMain.handle("runtime:doctor", async (_event, id: string) => runtime.doctor(await connection(id)));
   ipcMain.handle("legacy:read", async () => Boolean(await legacy()));
@@ -140,13 +156,15 @@ function registerIpc(): void {
   ipcMain.handle("legacy:import", async (_event, name: string) => { const raw = await legacy(); if (!raw) throw new Error("Legacy config.json was not found"); return store.add(parseConnectionImport({ telemetryEndpoint: DEFAULT_CONFIG.telemetryEndpoint, missionSyncEndpoint: DEFAULT_CONFIG.missionSyncEndpoint, ...raw }), name); });
 }
 async function createWindow(): Promise<void> {
-  window = new BrowserWindow({ width: 640, height: 540, minWidth: 520, minHeight: 420, backgroundColor: "#101418", webPreferences: { preload: path.join(codeRoot, "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  window = new BrowserWindow({ width: 640, height: 360, minWidth: 520, minHeight: MIN_CONTENT_HEIGHT, useContentSize: true, backgroundColor: "#101418", webPreferences: { preload: path.join(codeRoot, "desktop", "preload.cjs"), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   // The window only ever shows the Bridge's own pages: no new windows, no navigating away.
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   window.webContents.on("will-navigate", (event) => { event.preventDefault(); });
   window.webContents.on("will-attach-webview", (event) => { event.preventDefault(); });
   window.on("close", () => { void stopDirectors(); shuttingDown = true; });
   window.on("closed", () => { window = undefined; });
+  // Only a resize by the player fires this (setContentSize does not).
+  window.on("will-resize", () => { resizedByHand = true; });
   await window.loadFile(path.join(codeRoot, "desktop", "renderer", "index.html"));
   // The window loaded from this code: tell the launcher this version starts correctly.
   launcher?.markHealthy();
