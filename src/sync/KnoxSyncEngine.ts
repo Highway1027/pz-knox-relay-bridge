@@ -154,6 +154,19 @@ export class KnoxSyncEngine {
     await this.currentPoll?.catch(() => undefined);
   }
 
+  // The game heartbeat of this save stopped (desktop 0.3.2): one call so the backend can close the play session and
+  // write its recap sooner. Called after stopAndWait, so the last telemetry is out first. Never throws: without it the
+  // backend closes the session after 20 idle minutes anyway.
+  async reportGameEnded(saveId: string): Promise<void> {
+    if (!this.api.reportGameEnded) return;
+    try {
+      const answer = await this.api.reportGameEnded(saveId);
+      this.logger.info(`Game ended for ${saveId}: told the backend${answer.sessionOpen ? " (its recap follows in 5 to 10 minutes)" : ""}`);
+    } catch (error) {
+      this.logger.warn(`Game ended for ${saveId}, but the backend was not told: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   // The save being played, from the game heartbeat (desktop 0.3.0). Same as a snapshot naming it.
   followSave(saveId: string | undefined): void {
     this.noteSave(saveId ? { saveId } : undefined);

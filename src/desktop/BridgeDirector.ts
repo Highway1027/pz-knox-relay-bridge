@@ -23,8 +23,11 @@ export const START_RETRY_MS = 30_000;
 
 export interface DirectorRunner {
   start(connection: ConnectionMetadata, options: KnoxSyncEngineOptions): Promise<ConnectionRuntimeState>;
-  stopAndWait(id: string): Promise<void>;
+  // gameEndedSaveId (0.3.2): after stopping, tell the backend the game of this save stopped.
+  stopAndWait(id: string, gameEndedSaveId?: string): Promise<void>;
   followSave(id: string, saveId: string | undefined): void;
+  // The running connection tells the backend the game of this save stopped (another save of the same network loaded).
+  reportGameEnded?(id: string, saveId: string): Promise<void>;
 }
 
 export interface DirectorStatus {
@@ -53,6 +56,15 @@ export interface DirectorOptions {
 
 async function mtimeOf(filePath: string): Promise<number | undefined> {
   try { return (await stat(filePath)).mtimeMs; } catch { return undefined; }
+}
+
+// Bridge 0.3.2 (plan, Bridge detection "Later"): the save that was being played with a heartbeat and is not any more
+// (the heartbeat stopped, or another save was loaded). The running connection tells the backend, so the play session
+// closes and its recap is written 5 to 10 minutes later instead of after 20 idle minutes. Older boards (legacy) have no
+// heartbeat to go by.
+export function gameEnded(previous: LinkDecision, next: LinkDecision): string | undefined {
+  if (previous.state !== "active" || previous.legacy || !previous.saveId) return undefined;
+  return next.saveId === previous.saveId ? undefined : previous.saveId;
 }
 
 export class BridgeDirector {
@@ -128,11 +140,14 @@ export class BridgeDirector {
     if (previous.state !== decision.state || previous.saveId !== decision.saveId || previous.networkId !== decision.networkId) this.logDecision(decision);
 
     const target = decision.state === "active" ? metadata.find((item) => item.id === decision.connection?.id) : undefined;
+    const ended = gameEnded(previous, decision);
     if (this.activeId && this.activeId !== target?.id) {
       this.log("INFO", `Stopping ${this.activeName ?? "the running connection"} after the call in flight`);
-      await this.options.runner.stopAndWait(this.activeId);
+      await this.options.runner.stopAndWait(this.activeId, ended);
       this.activeId = undefined;
       this.activeName = undefined;
+    } else if (this.activeId && ended) {
+      await this.options.runner.reportGameEnded?.(this.activeId, ended);
     }
     if (target && this.activeId !== target.id && !this.stopped) await this.startConnection(target, now);
     if (this.activeId) this.options.runner.followSave(this.activeId, decision.saveId);

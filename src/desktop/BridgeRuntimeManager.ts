@@ -60,11 +60,14 @@ export class BridgeRuntimeManager {
     this.active.delete(id); return { connectionId: id, state: "offline", backend: "unknown", exchangeDirectory: runtime.state.exchangeDirectory };
   }
   // Desktop 0.3.0 (BridgeDirector): stop after the call in flight, so a switch never cuts a request off halfway.
-  async stopAndWait(id: string): Promise<void> {
+  // gameEndedSaveId (desktop 0.3.2): the game heartbeat stopped; once the last calls are out, tell the backend.
+  async stopAndWait(id: string, gameEndedSaveId?: string): Promise<void> {
     const engine = this.active.get(id)?.engine;
     this.stop(id);
     await engine?.stopAndWait();
+    if (gameEndedSaveId) await engine?.reportGameEnded(gameEndedSaveId);
   }
+  async reportGameEnded(id: string, saveId: string): Promise<void> { await this.active.get(id)?.engine?.reportGameEnded(saveId); }
   followSave(id: string, saveId: string | undefined): void { this.active.get(id)?.engine?.followSave(saveId); }
   logger(id: string): KnoxLogger | undefined { return this.active.get(id)?.logger; }
   stopAll(): void { for (const id of [...this.active.keys()]) this.stop(id); }

@@ -3,7 +3,7 @@
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { createHash as createSha256 } from "node:crypto";
-import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type JournalRequestMessage, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type JournalRequestMessage, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse, type GameEndedResponse } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -170,6 +170,14 @@ export function validateMissionQueuedResponse(value: unknown): MissionQueuedResp
   const response = value as Record<string, unknown>;
   if (response.ok !== true || response.protocolVersion !== 1 || !isMissionId(response.missionId)) throw new Error("backend did not acknowledge queued mission");
   return response as unknown as MissionQueuedResponse;
+}
+
+export function validateGameEndedResponse(value: unknown, saveId: string): GameEndedResponse {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("response root must be an object");
+  const response = value as Record<string, unknown>;
+  if (!exactKeys(response, ["ok", "protocolVersion", "saveId", "sessionOpen"]) || response.ok !== true || response.protocolVersion !== 1 ||
+      response.saveId !== saveId || typeof response.sessionOpen !== "boolean") throw new Error("backend did not acknowledge the game end");
+  return response as unknown as GameEndedResponse;
 }
 
 export function validateMissionReceivedAcknowledgement(value: unknown): MissionReceivedAcknowledgement {
