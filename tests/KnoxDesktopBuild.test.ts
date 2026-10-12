@@ -6,7 +6,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-const expectedMethods = ["list", "add", "update", "remove", "connectionsChanged", "bridgeStatus", "onBridgeStatus", "status", "doctor", "legacy", "importLegacy", "onLog"];
+const expectedMethods = ["list", "add", "update", "remove", "connectionsChanged", "bridgeStatus", "onBridgeStatus", "fitHeight", "status", "doctor", "legacy", "importLegacy", "onLog"];
 
 test("desktop preload is CommonJS, exists, and exposes the renderer API contract", async () => {
   const preloadPath = path.resolve("desktop", "preload.cjs");
@@ -61,7 +61,7 @@ test("compact window: no tabs, a cog per connection, Debug inside Settings, ever
   for (const field of ["edit-name", "edit-root", "edit-token"]) assert.match(renderer, new RegExp(`<label title="[^"]+">[^<]*(<span class="hint">[^<]*</span>)?<input id="${field}"`), `${field} has a tooltip`);
   assert.match(renderer, /OK_NOTICE_MS = 3000/, "up-to-date notice closes sooner");
   assert.match(renderer, /showNotice\("ready", [\s\S]*?, false\)/, "the restart notice stays");
-  assert.match(main, /width: 640, height: 540/);
+  assert.match(main, /width: 640, height: 360/); // 0.3.2: the page sets the height (WindowFit)
 });
 
 test("hidden elements stay hidden even when a class sets display", async () => {
