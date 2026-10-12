@@ -129,3 +129,54 @@ test("director: the game stops, another save loads, another network: each tells 
     assert.equal(runner.events.length, 7, "closing the Bridge without a game says nothing more");
   } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------- safe to close (Bridge 0.3.3)
+
+const completion = (messageId: string) => ({ protocolVersion: 1, messageId, type: "mission_completed", createdAt: new Date().toISOString(),
+  payload: { missionId: "knox_t_1", missionVersion: 1, objectiveType: "external", completedBy: "steam:1", saveId: "save_one" } });
+
+test("finishGame: a file the game left behind is still sent; a failed send counts as waiting", async () => {
+  const exchangeDirectory = await mkdtemp(path.join(os.tmpdir(), "knox-finish-"));
+  try {
+    const paths = queuePaths(exchangeDirectory); await ensureQueueDirectories(paths);
+    let fail = false; const completed: string[] = []; const ended: string[] = [];
+    const api = {
+      acknowledgeMissionCompleted: async (missionId: string) => { if (fail) throw new Error("offline"); completed.push(missionId); return { ok: true }; },
+      reportGameEnded: async (saveId: string): Promise<GameEndedResponse> => { ended.push(saveId); if (fail) throw new Error("offline"); return { ok: true, protocolVersion: 1, saveId, sessionOpen: true }; },
+    } as unknown as KnoxApiTransport;
+    const engine = new KnoxSyncEngine({ ...DEFAULT_CONFIG, exchangeDirectory }, new KnoxLogger(), api);
+
+    // Written just now (younger than the stable age): the last pass takes it anyway.
+    await writeFile(path.join(paths.gamePending, "mission_completed_knox_t_1_v1.json"), JSON.stringify(completion("evt_c1")));
+    assert.deepEqual(await engine.finishGame("save_one"), { saveId: "save_one", told: true, waiting: 0 });
+    assert.deepEqual(completed, ["knox_t_1"]); assert.deepEqual(ended, ["save_one"]);
+
+    fail = true;
+    await writeFile(path.join(paths.gamePending, "mission_completed_knox_t_1_v1.json"), JSON.stringify(completion("evt_c2")));
+    assert.deepEqual(await engine.finishGame("save_one"), { saveId: "save_one", told: false, waiting: 1 }, "kept for the next run, not safe to call done");
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});
+
+test("director: after the game stops, the window gets the result until the next game", async () => {
+  const exchangeDirectory = await mkdtemp(path.join(os.tmpdir(), "knox-finish-director-"));
+  try {
+    const paths = queuePaths(exchangeDirectory); await ensureQueueDirectories(paths);
+    const runner = new FakeRunner();
+    (runner as DirectorRunner).stopAndWait = async (id: string, saveId?: string) => { runner.events.push(`stop ${id}`); return saveId ? { saveId, told: true, waiting: 0 } : undefined; };
+    let now = Date.now();
+    const director = new BridgeDirector({ exchangeDirectory, runner, bridgeVersion: "0.3.3", connections: async () => [A].map(metadata), clock: () => now });
+    const heartbeatPath = path.join(paths.gameTelemetry, GAME_HEARTBEAT_FILE);
+    const writeGame = async () => { await writeFile(heartbeatPath, JSON.stringify(beat())); await utimes(heartbeatPath, now / 1000, now / 1000); };
+
+    await writeGame(); await director.tick();
+    assert.equal(director.current().lastGame, undefined);
+    now += 16_000; await director.tick();
+    assert.equal(director.current().state, "idle");
+    assert.deepEqual(director.current().lastGame, { saveId: "save_one", told: true, waiting: 0, endedAt: now });
+    now += 1000; await director.tick();
+    assert.equal(director.current().lastGame?.saveId, "save_one", "stays while idle");
+    now += 1000; await writeGame(); await director.tick();
+    assert.equal(director.current().state, "active"); assert.equal(director.current().lastGame, undefined, "a new game clears it");
+    await director.stop();
+  } finally { await rm(exchangeDirectory, { recursive: true, force: true }); }
+});

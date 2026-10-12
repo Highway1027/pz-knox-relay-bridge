@@ -4,7 +4,7 @@
 import { DEFAULT_CONFIG, resolveExchangeDirectory, type KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { doctorLines, validateExchangeParent } from "../diagnostics/KnoxDiagnostics.js";
 import { KnoxLogger, type KnoxLogEvent } from "../logging/KnoxLogger.js";
-import { KnoxSyncEngine, type KnoxSyncEngineOptions } from "../sync/KnoxSyncEngine.js";
+import { KnoxSyncEngine, type KnoxSyncEngineOptions, type GameEndResult } from "../sync/KnoxSyncEngine.js";
 import type { ConnectionStore } from "./ConnectionStore.js";
 import { assertSecureEndpoint, type ConnectionMetadata } from "./ConnectionTypes.js";
 
@@ -61,11 +61,13 @@ export class BridgeRuntimeManager {
   }
   // Desktop 0.3.0 (BridgeDirector): stop after the call in flight, so a switch never cuts a request off halfway.
   // gameEndedSaveId (desktop 0.3.2): the game heartbeat stopped; once the last calls are out, tell the backend.
-  async stopAndWait(id: string, gameEndedSaveId?: string): Promise<void> {
+  // Desktop 0.3.3: with a game end, a last pass and the result for the window (finishGame).
+  async stopAndWait(id: string, gameEndedSaveId?: string): Promise<GameEndResult | undefined> {
     const engine = this.active.get(id)?.engine;
     this.stop(id);
     await engine?.stopAndWait();
-    if (gameEndedSaveId) await engine?.reportGameEnded(gameEndedSaveId);
+    if (gameEndedSaveId && engine) return engine.finishGame(gameEndedSaveId);
+    return undefined;
   }
   async reportGameEnded(id: string, saveId: string): Promise<void> { await this.active.get(id)?.engine?.reportGameEnded(saveId); }
   followSave(id: string, saveId: string | undefined): void { this.active.get(id)?.engine?.followSave(saveId); }

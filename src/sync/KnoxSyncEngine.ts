@@ -37,6 +37,9 @@ const isMissionState = (message: { type: string }): message is MissionStateMessa
 
 // Desktop 0.3.0: the connection only sends the files of saves linked to its network (KnoxGameLink.routesTo); other
 // files wait in the folder for their network. The CLI sends everything.
+// Desktop 0.3.3: what happened when the game of a save stopped (see finishGame).
+export interface GameEndResult { saveId: string; told: boolean; waiting: number }
+
 export interface KnoxSyncEngineOptions { route?: (saveId: string | undefined) => boolean }
 
 // The mission as the backend sent it, plus this connection's network id and name.
@@ -156,15 +159,42 @@ export class KnoxSyncEngine {
 
   // The game heartbeat of this save stopped (desktop 0.3.2): one call so the backend can close the play session and
   // write its recap sooner. Called after stopAndWait, so the last telemetry is out first. Never throws: without it the
-  // backend closes the session after 20 idle minutes anyway.
-  async reportGameEnded(saveId: string): Promise<void> {
-    if (!this.api.reportGameEnded) return;
+  // backend closes the session after 20 idle minutes anyway. True when the backend was told.
+  async reportGameEnded(saveId: string): Promise<boolean> {
+    if (!this.api.reportGameEnded) return false;
     try {
       const answer = await this.api.reportGameEnded(saveId);
       this.logger.info(`Game ended for ${saveId}: told the backend${answer.sessionOpen ? " (its recap follows in 5 to 10 minutes)" : ""}`);
+      return true;
     } catch (error) {
       this.logger.warn(`Game ended for ${saveId}, but the backend was not told: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
     }
+  }
+
+  // Desktop 0.3.3: the game of this save stopped. After stopAndWait: one last pass over what the game left behind (its
+  // outbox, also files younger than the stable age, and the latest snapshot), then the game_ended call, then a count
+  // of what still waits (a failed send keeps its file for a retry the next time the game runs). The window says
+  // "safe to close" only when nothing waits.
+  async finishGame(saveId: string): Promise<GameEndResult> {
+    try {
+      // The game stopped writing 15 s ago, so every file is complete; no stable-age wait (file times can run ahead of the clock).
+      const names = (await readdir(this.paths.gamePending)).filter((name) => name.endsWith(".json")).sort();
+      for (const name of names) await this.processFile(path.join(this.paths.gamePending, name));
+      await this.processTelemetrySnapshot();
+    } catch (error) {
+      this.logger.error(`Last pass after the game ended: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const told = await this.reportGameEnded(saveId);
+    const waiting = await this.waitingCount();
+    if (waiting > 0) this.logger.warn(`Game ended for ${saveId}: ${waiting} update(s) could not be sent yet; they stay queued for the next time the game runs`);
+    return { saveId, told, waiting };
+  }
+
+  private async waitingCount(): Promise<number> {
+    let files = 0;
+    try { files = (await readdir(this.paths.gamePending)).filter((name) => name.endsWith(".json")).length; } catch { files = 0; }
+    return files + (this.telemetryRetry.messageId ? 1 : 0);
   }
 
   // The save being played, from the game heartbeat (desktop 0.3.0). Same as a snapshot naming it.
