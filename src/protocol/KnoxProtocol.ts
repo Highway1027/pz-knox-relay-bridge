@@ -267,6 +267,15 @@ export interface HistoryRecap {
   text: string;
 }
 
+// Answer to action game_ended (Bridge 0.3.2): the game heartbeat of this save stopped. sessionOpen: the backend had an
+// open play session for it (closed after a short grace unless the game comes back).
+export interface GameEndedResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  saveId: string;
+  sessionOpen: boolean;
+}
+
 export interface HistoryPullResponse {
   ok: true;
   protocolVersion: typeof KNOX_PROTOCOL_VERSION;

@@ -2,8 +2,8 @@
 // v5 - 26-09-2026 - Relay authoritative mission completion and decline state
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind, type MissionRequestResponse, type MessagePullResponse, type MessageQueuedResponse, type RadioMessageId, type HistoryPullResponse } from "../protocol/KnoxProtocol.js";
-import { validateAudioPullResponse, validateAudioQueuedResponse, validateHistoryPullResponse, validateMessagePullResponse, validateMessageQueuedResponse,validateMissionPullResponse, validateMissionQueuedResponse, validateMissionRequestResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind, type MissionRequestResponse, type MessagePullResponse, type MessageQueuedResponse, type RadioMessageId, type HistoryPullResponse, type GameEndedResponse } from "../protocol/KnoxProtocol.js";
+import { validateGameEndedResponse, validateAudioPullResponse, validateAudioQueuedResponse, validateHistoryPullResponse, validateMessagePullResponse, validateMessageQueuedResponse,validateMissionPullResponse, validateMissionQueuedResponse, validateMissionRequestResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
   sendConnectorTest(message: "hello from Project Zomboid"): Promise<KnoxPingResponse>;
@@ -26,6 +26,8 @@ export interface KnoxApiTransport {
   acknowledgeMessageQueued?(messageId: RadioMessageId): Promise<MessageQueuedResponse>;
   // World history for the game's Journal window (Bridge 0.2.11). Optional like the ones above.
   pullHistory?(saveId: string): Promise<HistoryPullResponse>;
+  // The game heartbeat of this save stopped (Bridge 0.3.2), so the backend can close the play session. Optional like the ones above.
+  reportGameEnded?(saveId: string): Promise<GameEndedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -127,6 +129,10 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateHistoryPullResponse(await this.missionRequest({ action: "history", saveId }), saveId);
   }
 
+  async reportGameEnded(saveId: string): Promise<GameEndedResponse> {
+    return validateGameEndedResponse(await this.missionRequest({ action: "game_ended", saveId }), saveId);
+  }
+
   async pullAudio(): Promise<AudioPullResponse> {
     return validateAudioPullResponse(await this.audioRequest({ action: "pull" }));
   }
@@ -163,7 +169,7 @@ export class KnoxApiClient implements KnoxApiTransport {
   }
 
   private async missionRequest(action: { action: "pull" | "messages" } | { action: "message_queued"; messageId: RadioMessageId } |{ action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }
-    | { action: "request"; requestId: string; requestedBy: string; saveId?: string } | { action: "history"; saveId: string }
+    | { action: "request"; requestId: string; requestedBy: string; saveId?: string } | { action: "history" | "game_ended"; saveId: string }
     | { action: "journal_now"; requestId: string; requestedBy: string; saveId: string }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");

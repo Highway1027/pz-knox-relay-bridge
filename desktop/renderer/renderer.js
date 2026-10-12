@@ -210,4 +210,20 @@ if (!window.knox) {
   (async () => { $("auto-update").checked = await api.getAutoUpdate(); showUpdateStatus(await api.lastUpdate()); })();
   renderVersion();
   refresh();
+
+  // Bridge 0.3.2 (plan "Bridge window fits its content"): the window is as tall as the page it shows. The page asks
+  // main for its height whenever something on it changes size; main clamps it to the screen and stops once the
+  // player resizes the window by hand.
+  let fitTimer;
+  function requestFit() {
+    if (typeof api.fitHeight !== "function") return;
+    clearTimeout(fitTimer);
+    fitTimer = setTimeout(() => {
+      const page = document.querySelector("header").offsetHeight + ($("update-banner").hidden ? 0 : $("update-banner").offsetHeight) + document.querySelector("main").offsetHeight;
+      const dialog = $("add-dialog").open ? $("add-dialog").offsetHeight + 48 : 0;
+      api.fitHeight(Math.max(page, dialog)).catch(() => {});
+    }, 30);
+  }
+  const sizes = new ResizeObserver(requestFit);
+  [document.querySelector("header"), $("update-banner"), document.querySelector("main"), $("add-dialog")].forEach((element) => sizes.observe(element));
 }
