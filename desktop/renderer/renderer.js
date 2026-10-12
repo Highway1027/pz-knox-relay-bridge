@@ -33,7 +33,7 @@ if (!window.knox) {
     const network = bridge.networkId ? (state.connections.find((item) => item.networkId === bridge.networkId)?.name ?? `network ${short(bridge.networkId)}`) : "";
     switch (bridge.state) {
       case "no_game_folder": return ["warn", "Project Zomboid's user folder was not found.", "Start Project Zomboid once on this account."];
-      case "idle": return ["", "Waiting for Project Zomboid.", "No web calls until a save with Knox Mission Board is loaded."];
+      case "idle": return bridge.lastGame ? gameClosedText(bridge.lastGame) : ["", "Waiting for Project Zomboid.", "No web calls until a save with Knox Mission Board is loaded."];
       case "unlinked": return ["warn", `Game running: ${saveLabel(bridge)}${modeLabel(bridge)} is not linked to a Knox network yet.`, "Pick the network in game: Mission Board window, “Link this save to”."];
       case "no_connection": if (bridge.legacy && !bridge.networkId) return ["warn", "An older Knox Mission Board is running; it does not say which Knox network this save uses.", "Update Knox Mission Board to 0.37.0 or later. Until then the Bridge runs a connection only when there is just one, or one this save used before."];
         return ["warn", `Game running: ${saveLabel(bridge)} is linked to ${escapeHtml(network || "a network")}, but no connection here has it.`, "Add that network's setup text from the Knox webapp, or unlink the save in game."];
@@ -41,6 +41,13 @@ if (!window.knox) {
       case "stopped": return ["", "Bridge stopped.", ""];
       default: return ["active", `Running ${escapeHtml(bridge.activeName ?? network)} for ${saveLabel(bridge)}${modeLabel(bridge)}.`, bridge.legacy ? "Older Mission Board without a heartbeat: update the mod for save linking." : "The Bridge follows the save: another save switches the connection by itself."];
     }
+  }
+  // Bridge 0.3.3: after a game ran here, say whether everything reached Knox, so the player knows when to close the Bridge.
+  function gameClosedText(game) {
+    const at = new Date(game.endedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (game.waiting > 0) return ["warn", `Game closed at ${at}, but ${game.waiting} update${game.waiting === 1 ? "" : "s"} could not reach Knox yet.`, "Nothing is lost: they stay queued and are sent the next time you play this save with the Bridge."];
+    if (!game.told) return ["active", `Game closed at ${at}. Everything was sent: safe to close the Bridge.`, "Knox missed the “game ended” note, so the session recap comes after about 20 minutes instead of 10."];
+    return ["active", `Game closed at ${at}. Everything was sent: safe to close the Bridge.`, "The session recap follows in about 10 minutes. The Bridge waits for the next game."];
   }
   function renderBridge() {
     const bridge = state.bridge[0];
