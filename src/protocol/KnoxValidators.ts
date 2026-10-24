@@ -3,7 +3,7 @@
 
 import { ENVELOPE_MISSION_ID, validateEnvelopeMission, validateSnapshot } from "./KnoxEnvelope.js";
 import { createHash as createSha256 } from "node:crypto";
-import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type JournalRequestMessage, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse, type GameEndedResponse } from "./KnoxProtocol.js";
+import { KNOX_PROTOCOL_VERSION, type AudioPullResponse, type AudioQueuedResponse, type ConnectorTestMessage, type GameTelemetryMessage, type KnoxPingResponse, type KnoxTelemetryResponse, type MissionPullResponse, type MissionQueuedResponse, type MissionReceivedAcknowledgement, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionStateMessage, type MissionStateKind, type ConnectorMission, type MissionId, type MissionRequestMessage, type MissionRequestResponse, type JournalRequestMessage, type KnoxRadioMessage, type MessagePullResponse, type MessageQueuedResponse, type MessageReceivedAcknowledgement, type HistoryPullResponse, type GameEndedResponse, type PeoplePullResponse, type KnoxFoundRequest, type FoundPullResponse, type FoundQueuedResponse, type FoundReceivedAcknowledgement } from "./KnoxProtocol.js";
 
 const MESSAGE_ID_PATTERN = /^evt_[A-Za-z0-9_-]{1,96}$/;
 
@@ -393,4 +393,96 @@ export function validateMessageReceivedAcknowledgement(value: unknown): MessageR
       Array.isArray(payload) || !exactKeys(payload, ["messageId"]) || typeof payload.messageId !== "string" || !RADIO_MESSAGE_ID_PATTERN.test(payload.messageId))
     throw new Error("invalid message acknowledgement");
   return message as unknown as MessageReceivedAcknowledgement;
+}
+
+// Living world people (Bridge 0.3.4): the game's limits (KnoxPeople.lua) for ids and texts. Kind names are only
+// checked for their shape, so a new talk kind needs no Bridge release; the game drops kinds it does not know.
+export const PEOPLE_LIMITS = Object.freeze({ people: 200, voices: 20, kinds: 32, linesPerKind: 3, line: 100, about: 160, name: 40, maxBytes: 256 * 1024 });
+const PEOPLE_ID = /^[A-Za-z0-9]{1,32}$/;
+const VOICE_ID = /^[a-z0-9_]{1,32}$/;
+const TALK_KIND = /^[a-z]{1,16}$/;
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+
+function validLines(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const kinds = Object.keys(value);
+  if (kinds.length > PEOPLE_LIMITS.kinds) return false;
+  return kinds.every((kind) => {
+    const lines = value[kind];
+    return TALK_KIND.test(kind) && Array.isArray(lines) && lines.length <= PEOPLE_LIMITS.linesPerKind &&
+      lines.every((line) => boundedText(line, 1, PEOPLE_LIMITS.line));
+  });
+}
+
+export function validatePeoplePullResponse(value: unknown, saveId: string): PeoplePullResponse {
+  if (!isRecord(value)) throw new Error("response root must be an object");
+  const response = value;
+  if (!exactKeys(response, ["ok", "protocolVersion", "saveId", "version", "people", "voices"]) || response.ok !== true ||
+      response.protocolVersion !== 1 || response.saveId !== saveId || !Number.isSafeInteger(response.version) || Number(response.version) < 0 ||
+      !Array.isArray(response.people) || response.people.length > PEOPLE_LIMITS.people ||
+      !Array.isArray(response.voices) || response.voices.length > PEOPLE_LIMITS.voices)
+    throw new Error("invalid people response");
+  for (const person of response.people as unknown[]) {
+    if (!isRecord(person) || !exactKeys(person, ["holdout", "resident", "about", "lines"]) ||
+        typeof person.holdout !== "string" || !PEOPLE_ID.test(person.holdout) || typeof person.resident !== "string" || !PEOPLE_ID.test(person.resident) ||
+        !boundedText(person.about, 0, PEOPLE_LIMITS.about) || !validLines(person.lines))
+      throw new Error("invalid people entry");
+  }
+  for (const voice of response.voices as unknown[]) {
+    if (!isRecord(voice) || !exactKeys(voice, ["voice", "name", "lines"]) || typeof voice.voice !== "string" || !VOICE_ID.test(voice.voice) ||
+        !boundedText(voice.name, 1, PEOPLE_LIMITS.name) || !validLines(voice.lines))
+      throw new Error("invalid people voice");
+  }
+  if (Buffer.byteLength(JSON.stringify(response), "utf8") > PEOPLE_LIMITS.maxBytes) throw new Error("people response is too large");
+  return response as unknown as PeoplePullResponse;
+}
+
+// Found requests (Bridge 0.3.4): exactly the game's rules (KnoxPeople.cleanFound), so a request the Bridge passes is
+// one the game can take. Optional fields are null when not set.
+export const FOUND_REQUEST_ID_PATTERN = /^fr_[a-z0-9_]{1,61}$/;
+export const FOUND_BUILDINGS = Object.freeze(["church", "farm", "house", "shop", "warehouse", "any"]);
+export const FOUND_PROFESSIONS = Object.freeze(["nurse", "carpenter", "mechanic", "farmer", "hunter", "cook", "electrician", "tailor", "fisherman", "pastor"]);
+const mapCoordinate = (value: unknown): boolean => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 30000;
+
+export function validateFoundRequest(value: unknown): KnoxFoundRequest {
+  if (!isRecord(value)) throw new Error("found request must be an object");
+  const request = value;
+  const place = request.place;
+  if (!exactKeys(request, ["requestId", "saveId", "place", "radius", "building", "founding", "name", "female", "profession", "reason"]) ||
+      typeof request.requestId !== "string" || !FOUND_REQUEST_ID_PATTERN.test(request.requestId) ||
+      typeof request.saveId !== "string" || !SAVE_ID_PATTERN.test(request.saveId) ||
+      !isRecord(place) || !exactKeys(place, ["x", "y"]) || !mapCoordinate(place.x) || !mapCoordinate(place.y) ||
+      !Number.isInteger(request.radius) || Number(request.radius) < 30 || Number(request.radius) > 600 ||
+      !FOUND_BUILDINGS.includes(request.building as string) || (request.founding !== "settled" && request.founding !== "arc") ||
+      !(request.name === null || boundedText(request.name, 1, PEOPLE_LIMITS.name)) ||
+      !(request.female === null || typeof request.female === "boolean") ||
+      !(request.profession === null || FOUND_PROFESSIONS.includes(request.profession as string)) ||
+      !boundedText(request.reason, 1, 200))
+    throw new Error("invalid found request");
+  return request as unknown as KnoxFoundRequest;
+}
+
+export function validateFoundPullResponse(value: unknown): FoundPullResponse {
+  if (!isRecord(value)) throw new Error("response root must be an object");
+  if (!exactKeys(value, ["ok", "protocolVersion", "request"]) || value.ok !== true || value.protocolVersion !== 1) throw new Error("invalid found pull response");
+  if (value.request !== null) validateFoundRequest(value.request);
+  return value as unknown as FoundPullResponse;
+}
+
+export function validateFoundQueuedResponse(value: unknown, requestId: string): FoundQueuedResponse {
+  if (!isRecord(value)) throw new Error("response root must be an object");
+  if (value.ok !== true || value.protocolVersion !== 1 || value.requestId !== requestId) throw new Error("backend did not acknowledge queued found request");
+  return value as unknown as FoundQueuedResponse;
+}
+
+export function validateFoundReceivedAcknowledgement(value: unknown): FoundReceivedAcknowledgement {
+  if (!isRecord(value)) throw new Error("message root must be an object");
+  const message = value;
+  const payload = message.payload;
+  if (!exactKeys(message, ["protocolVersion", "messageId", "type", "createdAt", "payload"]) || message.protocolVersion !== 1 ||
+      message.type !== "found_received_ack" || typeof message.messageId !== "string" || !MESSAGE_ID_PATTERN.test(message.messageId) ||
+      typeof message.createdAt !== "string" || Number.isNaN(Date.parse(message.createdAt)) || !isRecord(payload) ||
+      !payloadKeysWithSave(payload, ["requestId"]) || typeof payload.requestId !== "string" || !FOUND_REQUEST_ID_PATTERN.test(payload.requestId))
+    throw new Error("invalid found acknowledgement");
+  return message as unknown as FoundReceivedAcknowledgement;
 }
