@@ -2,8 +2,8 @@
 // v5 - 26-09-2026 - Relay authoritative mission completion and decline state
 
 import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
-import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind, type MissionRequestResponse, type MessagePullResponse, type MessageQueuedResponse, type RadioMessageId, type HistoryPullResponse, type GameEndedResponse } from "../protocol/KnoxProtocol.js";
-import { validateGameEndedResponse, validateAudioPullResponse, validateAudioQueuedResponse, validateHistoryPullResponse, validateMessagePullResponse, validateMessageQueuedResponse,validateMissionPullResponse, validateMissionQueuedResponse, validateMissionRequestResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type AudioId, type AudioPullResponse, type AudioQueuedResponse, type GameTelemetryMessage, type KnoxPingRequest, type KnoxPingResponse, type KnoxTelemetryRequest, type KnoxTelemetryResponse, type MissionId, type MissionPullResponse, type MissionQueuedResponse, type MissionStateKind, type MissionRequestResponse, type MessagePullResponse, type MessageQueuedResponse, type RadioMessageId, type HistoryPullResponse, type GameEndedResponse, type PeoplePullResponse, type FoundPullResponse, type FoundQueuedResponse, type FoundRequestId } from "../protocol/KnoxProtocol.js";
+import { validateFoundPullResponse, validateFoundQueuedResponse, validatePeoplePullResponse, validateGameEndedResponse, validateAudioPullResponse, validateAudioQueuedResponse, validateHistoryPullResponse, validateMessagePullResponse, validateMessageQueuedResponse,validateMissionPullResponse, validateMissionQueuedResponse, validateMissionRequestResponse, validatePingResponse, validateTelemetryResponse } from "../protocol/KnoxValidators.js";
 
 export interface KnoxApiTransport {
   sendConnectorTest(message: "hello from Project Zomboid"): Promise<KnoxPingResponse>;
@@ -28,6 +28,10 @@ export interface KnoxApiTransport {
   pullHistory?(saveId: string): Promise<HistoryPullResponse>;
   // The game heartbeat of this save stopped (Bridge 0.3.2), so the backend can close the play session. Optional like the ones above.
   reportGameEnded?(saveId: string): Promise<GameEndedResponse>;
+  // Living world people and found requests (Bridge 0.3.4). Optional like the ones above.
+  pullPeople?(saveId: string): Promise<PeoplePullResponse>;
+  pullFound?(): Promise<FoundPullResponse>;
+  acknowledgeFoundQueued?(requestId: FoundRequestId): Promise<FoundQueuedResponse>;
 }
 
 export class KnoxApiClient implements KnoxApiTransport {
@@ -133,6 +137,18 @@ export class KnoxApiClient implements KnoxApiTransport {
     return validateGameEndedResponse(await this.missionRequest({ action: "game_ended", saveId }), saveId);
   }
 
+  async pullPeople(saveId: string): Promise<PeoplePullResponse> {
+    return validatePeoplePullResponse(await this.missionRequest({ action: "people", saveId }), saveId);
+  }
+
+  async pullFound(): Promise<FoundPullResponse> {
+    return validateFoundPullResponse(await this.missionRequest({ action: "found" }));
+  }
+
+  async acknowledgeFoundQueued(requestId: FoundRequestId): Promise<FoundQueuedResponse> {
+    return validateFoundQueuedResponse(await this.missionRequest({ action: "found_queued", requestId }), requestId);
+  }
+
   async pullAudio(): Promise<AudioPullResponse> {
     return validateAudioPullResponse(await this.audioRequest({ action: "pull" }));
   }
@@ -168,8 +184,9 @@ export class KnoxApiClient implements KnoxApiTransport {
     catch (error) { throw new Error(`invalid backend response: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
-  private async missionRequest(action: { action: "pull" | "messages" } | { action: "message_queued"; messageId: RadioMessageId } |{ action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }
-    | { action: "request"; requestId: string; requestedBy: string; saveId?: string } | { action: "history" | "game_ended"; saveId: string }
+  private async missionRequest(action: { action: "pull" | "messages" | "found" } | { action: "message_queued"; messageId: RadioMessageId } |{ action: "queued" | "completed" | "declined" | MissionStateKind; missionId: MissionId; saveId?: string; reason?: string }
+    | { action: "request"; requestId: string; requestedBy: string; saveId?: string } | { action: "history" | "game_ended" | "people"; saveId: string }
+    | { action: "found_queued"; requestId: FoundRequestId }
     | { action: "journal_now"; requestId: string; requestedBy: string; saveId: string }): Promise<unknown> {
     if (!this.config.missionSyncEndpoint) throw new Error("missionSyncEndpoint is not configured");
     if (!this.config.networkId) throw new Error("networkId is not configured");

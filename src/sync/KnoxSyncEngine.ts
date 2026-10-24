@@ -7,8 +7,8 @@ import type { KnoxBridgeConfig } from "../config/KnoxBridgeConfig.js";
 import { atomicWriteJson, ensureQueueDirectories, listStableJsonFiles, moveQueueFile, queuePaths, readJsonFile } from "../files/KnoxQueue.js";
 import { KnoxApiClient, type KnoxApiTransport } from "../http/KnoxApiClient.js";
 import type { KnoxLogger } from "../logging/KnoxLogger.js";
-import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile, type MessageReceivedAcknowledgement, type JournalRequestMessage } from "../protocol/KnoxProtocol.js";
-import { validateConnectorTest, validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateJournalRequest, validateMessageReceivedAcknowledgement, missionStateKind, SAVE_ID_PATTERN } from "../protocol/KnoxValidators.js";
+import { KNOX_PROTOCOL_VERSION, type ConnectorMission, type MissionFileIdentity, type ConnectorTestAcknowledgement, type ConnectorTestMessage, type MissionCompletedMessage, type MissionDeclinedMessage, type MissionReceivedAcknowledgement, type MissionStateMessage, type MissionRequestMessage, type MissionRequestStatusFile, type MessageReceivedAcknowledgement, type JournalRequestMessage, type FoundReceivedAcknowledgement, type KnoxFoundRequest } from "../protocol/KnoxProtocol.js";
+import { validateFoundReceivedAcknowledgement, validateConnectorTest,validateGameTelemetry, validateMissionCompleted, validateMissionDeclined, validateMissionReceivedAcknowledgement, validateMissionState, validateMissionRequest, validateJournalRequest, validateMessageReceivedAcknowledgement, missionStateKind, SAVE_ID_PATTERN } from "../protocol/KnoxValidators.js";
 
 export const KNOX_MISSION_INDEX_FILE = "knox_missions.json";
 // Radio messages outside missions (Bridge 0.2.10): message_<id>.json plus this index, same pattern as missions.
@@ -27,6 +27,17 @@ export const KNOX_JOURNAL_STATUS_FILE = "knox_journal_status.json";
 export const KNOX_STATUS_RECENT = 8;
 export const KNOX_HISTORY_FAST_POLL_MS = 20 * 1000;
 export const KNOX_HISTORY_FAST_POLLS = 5;
+// Living world people (Bridge 0.3.4, HOLDOUTS_DESIGN.md 19.3): one file per save, replaced as a whole like the history,
+// at once for a new save and then every KNOX_PEOPLE_POLL_MS.
+export const KNOX_PEOPLE_FILE = "knox_people.json";
+export const KNOX_PEOPLE_POLL_MS = 5 * 60 * 1000;
+// Found requests (Bridge 0.3.4, 19.5): found_<requestId>.json plus this index, acknowledged by the game like radio
+// messages. They are rare and the game reads them every 30 s, so the backend is asked every 6 mission polls (30 s).
+export const KNOX_FOUND_INDEX_FILE = "knox_found.json";
+export const KNOX_FOUND_POLL_FACTOR = 6;
+const KNOX_FOUND_FILE = /^found_(fr_[a-z0-9_]{1,61})\.json$/;
+// A backend without these actions (before webapp step 4c) answers HTTP 400: said once, asked again after this.
+export const KNOX_UNSUPPORTED_RETRY_MS = 5 * 60 * 1000;
 const KNOX_MISSION_FILE = /^mission_(knox_[a-z0-9_]{1,96})\.json$/;
 const KNOX_MISSION_INDEX_MAX = 64;
 
@@ -46,6 +57,14 @@ export interface KnoxSyncEngineOptions { route?: (saveId: string | undefined) =>
 export function withFileIdentity(mission: ConnectorMission, config: Pick<KnoxBridgeConfig, "networkId" | "connectionName">): ConnectorMission & MissionFileIdentity {
   const name = config.connectionName.trim().slice(0, 80);
   return { ...mission, networkId: config.networkId, ...(name ? { connectionName: name } : {}) };
+}
+
+// The found request file for the game (PROTOCOL.md): the request without its null fields, plus this connection's
+// network id and name so the game checks it as it checks missions.
+export function foundFile(request: KnoxFoundRequest, config: Pick<KnoxBridgeConfig, "networkId" | "connectionName">): Record<string, unknown> {
+  const set = Object.fromEntries(Object.entries(request).filter(([, value]) => value !== null));
+  const name = config.connectionName.trim().slice(0, 80);
+  return { protocolVersion: KNOX_PROTOCOL_VERSION, ...set, networkId: config.networkId, ...(name ? { connectionName: name } : {}) };
 }
 
 async function exists(filePath: string): Promise<boolean> {
@@ -82,6 +101,14 @@ export class KnoxSyncEngine {
   private historyRetryAttempts = 0;
   private lastHistoryJson?: string;
   private historyFastPolls = 0;
+  // Living world (Bridge 0.3.4).
+  private nextPeoplePollAt = 0;
+  private peopleRetryAttempts = 0;
+  private lastPeopleJson?: string;
+  private nextFoundPollAt = 0;
+  private foundRetryAttempts = 0;
+  private lastKnoxFoundIndex?: string;
+  private readonly unsupportedReported = new Set<string>();
   // The last answers per status file (newest last). 0.2.13 (Tim 10-10-2026, Mission Board sitting 1.8): two
   // players pressed within two seconds and the file held only the second answer, so the first press timed out.
   private readonly recentStatuses = new Map<string, MissionRequestStatusFile[]>();
@@ -130,11 +157,17 @@ export class KnoxSyncEngine {
     if (!this.running) return;
     await this.pollHistory();
     if (!this.running) return;
+    await this.pollPeople();
+    if (!this.running) return;
+    await this.pollFound();
+    if (!this.running) return;
     await this.pollAudio();
     if (!this.running) return;
     await this.refreshKnoxMissionIndex();
     if (!this.running) return;
     await this.refreshKnoxMessageIndex();
+    if (!this.running) return;
+    await this.refreshKnoxFoundIndex();
     if (!this.running) return;
     await this.pruneOldAcknowledgements();
   }
@@ -202,13 +235,14 @@ export class KnoxSyncEngine {
     this.noteSave(saveId ? { saveId } : undefined);
   }
 
-  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | JournalRequestMessage | MessageReceivedAcknowledgement | undefined> {
+  private async readAndValidate(filePath: string): Promise<ConnectorTestMessage | MissionReceivedAcknowledgement | MissionCompletedMessage | MissionDeclinedMessage | MissionStateMessage | MissionRequestMessage | JournalRequestMessage | MessageReceivedAcknowledgement | FoundReceivedAcknowledgement | undefined> {
     try {
       const value = await readJsonFile(filePath);
       const type = (value as { type?: unknown } | null)?.type;
       if (type === "connector_test") return validateConnectorTest(value);
       if (type === "mission_received_ack") return validateMissionReceivedAcknowledgement(value);
       if (type === "message_received_ack") return validateMessageReceivedAcknowledgement(value);
+      if (type === "found_received_ack") return validateFoundReceivedAcknowledgement(value);
       if (type === 'mission_completed') return validateMissionCompleted(value);
       if (type === 'mission_declined') return validateMissionDeclined(value);
       if (type === "mission_request") return validateMissionRequest(value);
@@ -256,6 +290,17 @@ export class KnoxSyncEngine {
       await moveQueueFile(filePath, this.paths.gameProcessed);
       this.retryState.delete(fileName);
       this.logger.log("PZ->BRIDGE", `radio message ${message.payload.messageId} acknowledged`);
+      return;
+    }
+
+    // The game took the found request into the save; its answer reaches the backend in the snapshot (foundRequests).
+    if (message.type === "found_received_ack") {
+      const foundFile = path.join(this.paths.bridgePending, `found_${message.payload.requestId}.json`);
+      if (await exists(foundFile)) await moveQueueFile(foundFile, this.paths.bridgeProcessed);
+      await moveQueueFile(filePath, this.paths.gameProcessed);
+      this.retryState.delete(fileName);
+      await this.refreshKnoxFoundIndex();
+      this.logger.log("PZ->BRIDGE", `found request ${message.payload.requestId} acknowledged`);
       return;
     }
 
@@ -531,6 +576,8 @@ export class KnoxSyncEngine {
     this.currentSaveId = saveId;
     this.nextHistoryPollAt = 0;
     this.historyRetryAttempts = 0;
+    this.nextPeoplePollAt = 0;
+    this.peopleRetryAttempts = 0;
   }
 
   // World history for the game's Journal window (Bridge 0.2.11): the latest journal entries and recaps of
@@ -558,6 +605,92 @@ export class KnoxSyncEngine {
       this.nextHistoryPollAt = Date.now() + delay;
       this.logger.error(`history sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // A backend that does not know an action yet answers HTTP 400. Said once per action; true when that was the case.
+  private unsupported(error: unknown, what: string): boolean {
+    if (!(error instanceof Error) || !error.message.includes("HTTP 400")) return false;
+    if (!this.unsupportedReported.has(what)) {
+      this.unsupportedReported.add(what);
+      this.logger.info(`The Knox backend does not offer ${what} yet; asking again every ${KNOX_UNSUPPORTED_RETRY_MS / 60000} minutes`);
+    }
+    return true;
+  }
+
+  // Living world people (Bridge 0.3.4): lines per resident and voice for the current save, written as knox_people.json.
+  // Rewritten only when it changed (or went missing); version 0 means nothing for this save yet, so no file.
+  private async pollPeople(): Promise<void> {
+    const saveId = this.currentSaveId;
+    if (!saveId || !this.config.missionSyncEndpoint || !this.api.pullPeople || Date.now() < this.nextPeoplePollAt) return;
+    this.nextPeoplePollAt = Date.now() + KNOX_PEOPLE_POLL_MS;
+    try {
+      const response = await this.api.pullPeople(saveId);
+      this.peopleRetryAttempts = 0;
+      if (response.version < 1) return;
+      const file = { protocolVersion: KNOX_PROTOCOL_VERSION, saveId: response.saveId, version: response.version,
+        people: response.people, voices: response.voices };
+      const json = JSON.stringify(file);
+      const filePath = path.join(this.paths.bridgePending, KNOX_PEOPLE_FILE);
+      if (json === this.lastPeopleJson && await exists(filePath)) return;
+      await atomicWriteJson(filePath, file);
+      this.lastPeopleJson = json;
+      this.logger.log("BRIDGE->PZ", `people for ${saveId} (version ${response.version}): ${response.people.length} people, ${response.voices.length} voices`);
+    } catch (error) {
+      if (this.unsupported(error, "living world people")) {
+        this.nextPeoplePollAt = Date.now() + KNOX_UNSUPPORTED_RETRY_MS;
+        return;
+      }
+      this.peopleRetryAttempts += 1;
+      const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.peopleRetryAttempts - 1, 20)), this.config.retryMaxMs);
+      this.nextPeoplePollAt = Date.now() + delay;
+      this.logger.error(`people sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // Found requests (Bridge 0.3.4): one per poll, written as found_<requestId>.json with this connection's network id
+  // and name (the game checks them as for missions). Unset optional fields are left out. A request already written
+  // (pending or processed) is only confirmed again.
+  private async pollFound(): Promise<void> {
+    if (!this.config.missionSyncEndpoint || !this.api.pullFound || !this.api.acknowledgeFoundQueued || Date.now() < this.nextFoundPollAt) return;
+    this.nextFoundPollAt = Date.now() + this.config.missionPollIntervalMs * KNOX_FOUND_POLL_FACTOR;
+    try {
+      const response = await this.api.pullFound();
+      this.foundRetryAttempts = 0;
+      if (!response.request) return;
+      const request = response.request;
+      const fileName = `found_${request.requestId}.json`;
+      const pendingPath = path.join(this.paths.bridgePending, fileName);
+      const processedPath = path.join(this.paths.bridgeProcessed, fileName);
+      if (!(await exists(pendingPath)) && !(await exists(processedPath))) {
+        await atomicWriteJson(pendingPath, foundFile(request, this.config));
+        this.logger.log("BRIDGE->PZ", `found request ${request.requestId} (${request.founding}, ${request.building}) queued`);
+      }
+      await this.api.acknowledgeFoundQueued(request.requestId);
+      await this.refreshKnoxFoundIndex();
+    } catch (error) {
+      if (this.unsupported(error, "found requests")) {
+        this.nextFoundPollAt = Date.now() + KNOX_UNSUPPORTED_RETRY_MS;
+        return;
+      }
+      this.foundRetryAttempts += 1;
+      const delay = Math.min(this.config.retryInitialMs * (2 ** Math.min(this.foundRetryAttempts - 1, 20)), this.config.retryMaxMs);
+      this.nextFoundPollAt = Date.now() + delay;
+      this.logger.error(`found sync retry in ${delay}ms: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // PZ Lua cannot list a folder: the game reads the waiting found request ids from this index.
+  private async refreshKnoxFoundIndex(): Promise<void> {
+    const indexPath = path.join(this.paths.bridgePending, KNOX_FOUND_INDEX_FILE);
+    const requestIds = (await readdir(this.paths.bridgePending))
+      .map((name) => KNOX_FOUND_FILE.exec(name)?.[1])
+      .filter((id): id is string => id !== undefined)
+      .sort()
+      .slice(0, KNOX_MISSION_INDEX_MAX);
+    const key = requestIds.join(",");
+    if (key === this.lastKnoxFoundIndex && await exists(indexPath)) return;
+    await atomicWriteJson(indexPath, { protocolVersion: KNOX_PROTOCOL_VERSION, requestIds });
+    this.lastKnoxFoundIndex = key;
   }
 
   // PZ Lua cannot list a folder: the Connector reads the waiting message ids from this index.

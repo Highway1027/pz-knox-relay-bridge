@@ -293,3 +293,71 @@ export interface MessageReceivedAcknowledgement {
   createdAt: string;
   payload: { messageId: RadioMessageId };
 }
+
+// Living world people (Bridge 0.3.4, Mission Board 0.49.0, HOLDOUTS_DESIGN.md 19.3): knoxMissionSync action "people"
+// for the save the telemetry names. Lines per talk kind; the game checks the kinds and placeholders.
+export type PeopleLines = Record<string, string[]>;
+
+export interface KnoxPersonLines {
+  holdout: string;
+  resident: string;
+  about: string;
+  lines: PeopleLines;
+}
+
+export interface KnoxVoiceLines {
+  voice: string;
+  name: string;
+  lines: PeopleLines;
+}
+
+// version 0: nothing for this save yet (living world off, or no lines written); the Bridge then writes no file.
+export interface PeoplePullResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  saveId: string;
+  version: number;
+  people: KnoxPersonLines[];
+  voices: KnoxVoiceLines[];
+}
+
+// Found requests (Bridge 0.3.4, HOLDOUTS_DESIGN.md 19.5): knoxMissionSync actions "found" and "found_queued".
+// The AI picks the place, the game picks the building. Unset optional fields are null; the Bridge leaves them out
+// of the found_<requestId>.json file.
+export type FoundRequestId = `fr_${string}`;
+export type FoundBuilding = "church" | "farm" | "house" | "shop" | "warehouse" | "any";
+
+export interface KnoxFoundRequest {
+  requestId: FoundRequestId;
+  saveId: string;
+  place: { x: number; y: number };
+  radius: number;
+  building: FoundBuilding;
+  founding: "settled" | "arc";
+  name: string | null;
+  female: boolean | null;
+  profession: string | null;
+  reason: string;
+}
+
+export interface FoundPullResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  request: KnoxFoundRequest | null;
+}
+
+export interface FoundQueuedResponse {
+  ok: true;
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  requestId: FoundRequestId;
+}
+
+// Written by the game once it took the request into the save; the Bridge then moves the file to processed.
+// saveId is left out while the save is not linked yet.
+export interface FoundReceivedAcknowledgement {
+  protocolVersion: typeof KNOX_PROTOCOL_VERSION;
+  messageId: string;
+  type: "found_received_ack";
+  createdAt: string;
+  payload: { requestId: FoundRequestId; saveId?: string };
+}
