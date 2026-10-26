@@ -64,6 +64,15 @@ test("compact window: no tabs, a cog per connection, Debug inside Settings, ever
   assert.match(main, /width: 640, height: 360/); // 0.3.2: the page sets the height (WindowFit)
 });
 
+test("Add connection sits top right with the cog left of it; the name comes from the setup text (0.3.5)", async () => {
+  const html = await readFile(path.resolve("desktop", "renderer", "index.html"), "utf8");
+  const renderer = await readFile(path.resolve("desktop", "renderer", "renderer.js"), "utf8");
+  const header = html.slice(html.indexOf("<header>"), html.indexOf("</header>"));
+  assert.ok(header.indexOf('id="settings-button"') >= 0 && header.indexOf('id="settings-button"') < header.indexOf('id="add-button"'), "cog, then Add connection, in the header");
+  assert.match(renderer, /raw\.name/, "the pasted setup text fills the name");
+  assert.match(renderer, /lastPlayedAt/, "each row shows the last play time");
+});
+
 test("hidden elements stay hidden even when a class sets display", async () => {
   // Regression: .update-banner{display:flex} overrode [hidden], so the banner showed empty and × could not close it.
   const css = await readFile(path.resolve("desktop", "renderer", "styles.css"), "utf8");

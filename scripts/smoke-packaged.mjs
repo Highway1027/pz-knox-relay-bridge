@@ -34,7 +34,8 @@ async function entries(directory) {
 // Bridge 0.3.0 writes its heartbeat (and a saveId -> network map once it saw a game), and a running connection writes the
 // mission and message indexes (pending starts empty, see assertIdleExchange): removed after every launch.
 const BRIDGE_FILES = ['bridge-to-game/pending/knox_bridge.json', 'game-to-bridge/telemetry/heartbeat.json', 'state/save-networks.json',
-  'bridge-to-game/pending/knox_missions.json', 'bridge-to-game/pending/knox_messages.json'];
+  'bridge-to-game/pending/knox_missions.json', 'bridge-to-game/pending/knox_messages.json',
+  'bridge-to-game/pending/knox_found.json'];
 async function removeBridgeFiles() {
   for (const relative of BRIDGE_FILES) await rm(path.join(exchangeRoot, relative), { force: true });
 }

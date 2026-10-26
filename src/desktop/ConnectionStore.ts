@@ -46,6 +46,13 @@ export class ConnectionStore {
     if (replacementToken) { const secrets = await readJson<SecretDocument>(this.secretsPath, { version: 1, tokens: {} }); secrets.tokens[id] = await this.vault.encrypt(replacementToken); await writeFile(this.secretsPath, `${JSON.stringify(secrets, null, 2)}\n`, { mode: 0o600 }); }
     return updated;
   }
+  // Bridge 0.3.5: when this connection last carried a game. Not a settings edit, so updatedAt stays.
+  async touchPlayed(id: string, at: string): Promise<void> {
+    const document = await readJson<StoreDocument>(this.metadataPath, { version: 1, connections: [] }); const current = document.connections.find((item) => item.id === id);
+    if (!current) return;
+    current.lastPlayedAt = at; await writeFile(this.metadataPath, `${JSON.stringify(document, null, 2)}
+`, { mode: 0o600 });
+  }
   async remove(id: string): Promise<void> {
     const document = await readJson<StoreDocument>(this.metadataPath, { version: 1, connections: [] }); document.connections = document.connections.filter((item) => item.id !== id);
     const secrets = await readJson<SecretDocument>(this.secretsPath, { version: 1, tokens: {} }); delete secrets.tokens[id];

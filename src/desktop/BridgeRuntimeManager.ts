@@ -12,8 +12,12 @@ export type RuntimePhase = "offline" | "starting" | "running" | "error" | "stopp
 export interface ConnectionRuntimeState { connectionId: string; state: RuntimePhase; backend: "unknown" | "online" | "offline"; exchangeDirectory?: string; lastTelemetrySync?: string; lastMissionSync?: string; playerCount?: number; lastError?: string }
 interface ActiveRuntime { engine?: KnoxSyncEngine; state: ConnectionRuntimeState; logger: KnoxLogger; stopped: boolean }
 
+// Bridge 0.3.5: the last play time is written at most this often per connection.
+export const PLAYED_SAVE_MS = 60_000;
+
 export class BridgeRuntimeManager {
   private readonly active = new Map<string, ActiveRuntime>();
+  private readonly playedSavedAt = new Map<string, number>();
   constructor(private readonly store: ConnectionStore, private readonly onLog: (id: string, event: KnoxLogEvent) => void = () => {}, private readonly preflight: (config: KnoxBridgeConfig) => Promise<void> = validateExchangeParent) {}
   status(id: string): ConnectionRuntimeState { return this.active.get(id)?.state ?? { connectionId: id, state: "offline", backend: "unknown" }; }
   describe(connection: ConnectionMetadata): ConnectionRuntimeState {
@@ -74,10 +78,16 @@ export class BridgeRuntimeManager {
   logger(id: string): KnoxLogger | undefined { return this.active.get(id)?.logger; }
   stopAll(): void { for (const id of [...this.active.keys()]) this.stop(id); }
   async doctor(connection: ConnectionMetadata): Promise<string[]> { return doctorLines(await this.config(connection)); }
+  private notePlayed(id: string, at: string): void {
+    const now = Date.now(); const last = this.playedSavedAt.get(id);
+    if (last !== undefined && now - last < PLAYED_SAVE_MS) return;
+    this.playedSavedAt.set(id, now);
+    this.store.touchPlayed(id, at).catch(() => {});
+  }
   private observe(state: ConnectionRuntimeState, event: KnoxLogEvent): void {
     if (/Knox Relay ONLINE|telemetry accepted|mission .* received/.test(event.message)) state.backend = "online";
     if (/Knox Relay OFFLINE|mission sync OFFLINE/.test(event.message)) state.backend = "offline";
-    if (/telemetry accepted/.test(event.message)) state.lastTelemetrySync = event.timestamp;
+    if (/telemetry accepted/.test(event.message)) { state.lastTelemetrySync = event.timestamp; this.notePlayed(state.connectionId, event.timestamp); }
     if (/mission .* received/.test(event.message)) state.lastMissionSync = event.timestamp;
     const players = event.message.match(/\((\d+) players\)/); if (players?.[1]) state.playerCount = Number(players[1]);
   }

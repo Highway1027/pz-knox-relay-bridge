@@ -1,5 +1,5 @@
 // desktop/renderer/renderer.js
-// v8 - 11-10-2026 - Smaller window: connection rows with a cog, Debug and Doctor inside Settings
+// v9 - 26-10-2026 - Name from the setup text, last played on each row
 
 if (!window.knox) {
   document.body.innerHTML = `<main class="fatal"><h1>Knox Relay Bridge failed to initialize.</h1><p>The desktop bridge API could not be loaded.</p><p>Open Developer Tools for diagnostics.</p></main>`;
@@ -12,6 +12,13 @@ if (!window.knox) {
   const short = (id) => id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id;
   const status = (id) => state.statuses.get(id) || { state: "offline", backend: "unknown" };
   const phaseLabel = (phase) => phase === "starting" ? "Starting…" : phase === "stopping" ? "Stopping…" : `${phase[0].toUpperCase()}${phase.slice(1)}`;
+  // Bridge 0.3.5: "Last played 26-10-2026 21:40" (Tim's date order).
+  const played = (value) => {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return "Not played yet";
+    const two = (number) => String(number).padStart(2, "0");
+    return `Last played ${two(date.getDate())}-${two(date.getMonth() + 1)}-${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}`;
+  };
   const ago = (value) => value ? `${Math.max(0, Math.round((Date.now() - Date.parse(value)) / 1000))} sec ago` : "Unknown";
 
   function show(view) {
@@ -62,7 +69,7 @@ if (!window.knox) {
     root.innerHTML = state.connections.map((connection) => {
       const runtime = status(connection.id);
       const error = runtime.lastError ? `<p class="error">${escapeHtml(String(runtime.lastError).split("\n")[0])}</p>` : "";
-      return `<article class="row ${runtime.state} ${runtime.state === "error" ? "error-state" : ""}"><div class="name"><strong>${escapeHtml(connection.name)}</strong><p class="status"><i class="dot"></i>${escapeHtml(runLabel(runtime))}${runtime.state === "running" ? ` · backend ${escapeHtml(runtime.backend)}` : ""}</p>${error}</div><button class="icon-button" data-open="${connection.id}" title="Settings of ${escapeHtml(connection.name)}" aria-label="Settings of ${escapeHtml(connection.name)}">⚙</button></article>`;
+      return `<article class="row ${runtime.state} ${runtime.state === "error" ? "error-state" : ""}"><div class="name"><strong>${escapeHtml(connection.name)}</strong><p class="status"><i class="dot"></i>${escapeHtml(runLabel(runtime))}${runtime.state === "running" ? ` · backend ${escapeHtml(runtime.backend)}` : ` · ${escapeHtml(played(connection.lastPlayedAt))}`}</p>${error}</div><button class="icon-button" data-open="${connection.id}" title="Settings of ${escapeHtml(connection.name)}" aria-label="Settings of ${escapeHtml(connection.name)}">⚙</button></article>`;
     }).join("");
     $("empty").hidden = state.connections.length > 0;
     root.querySelectorAll("[data-open]").forEach((button) => { button.onclick = () => openDetail(button.dataset.open); });
@@ -133,12 +140,20 @@ if (!window.knox) {
   // A setup text for a server other than the Knox Relay backend needs a second, deliberate click.
   let allowUnknownHosts = false;
   const resetAddDialog = () => { allowUnknownHosts = false; $("save-connection").textContent = "Validate & Save"; $("add-error").textContent = ""; };
-  $("setup-json").oninput = resetAddDialog;
+  // Bridge 0.3.5: the setup text carries the relay's name; it fills an empty name field (or one it filled itself).
+  let autoName = "";
+  $("setup-json").oninput = () => {
+    resetAddDialog();
+    let name = "";
+    try { const raw = JSON.parse($("setup-json").value); if (raw && typeof raw.name === "string") name = raw.name.trim(); } catch { return; }
+    const field = $("connection-name");
+    if (name && (field.value.trim() === "" || field.value === autoName)) { field.value = name; autoName = name; }
+  };
   $("save-connection").onclick = async () => {
     try {
       $("add-error").textContent = "";
       await api.add($("setup-json").value, $("connection-name").value, allowUnknownHosts);
-      $("add-dialog").close(); $("setup-json").value = ""; $("connection-name").value = ""; resetAddDialog(); await api.connectionsChanged(); await refresh();
+      $("add-dialog").close(); $("setup-json").value = ""; $("connection-name").value = ""; autoName = ""; resetAddDialog(); await api.connectionsChanged(); await refresh();
     } catch (error) {
       const message = String(error.message || error);
       const unknownHost = message.indexOf("UNKNOWN_HOST: ");
