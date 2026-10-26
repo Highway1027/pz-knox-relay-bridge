@@ -31,6 +31,20 @@ test("multiple connections persist without plaintext tokens in metadata", async 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test("the setup text's name names the connection; the last play time is kept apart from settings edits (0.3.5)", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "knox-desktop-"));
+  try {
+    const store = new ConnectionStore(directory, vault);
+    const named = await store.add(parseConnectionImport({ ...valid, name: "Arnhem test" }), "");
+    assert.equal(named.name, "Arnhem test");
+    assert.equal((await store.add(parseConnectionImport({ ...valid, name: "Arnhem test" }), "My own")).name, "My own");
+    await store.touchPlayed(named.id, "2026-10-26T20:40:00.000Z");
+    const saved = (await store.list()).find((item) => item.id === named.id)!;
+    assert.equal(saved.lastPlayedAt, "2026-10-26T20:40:00.000Z");
+    assert.equal(saved.updatedAt, named.updatedAt);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test("central logger redacts token fields, embedded secrets, and captures events", () => {
   const events: unknown[] = []; const logger = new KnoxLogger(["abc-secret"], false); logger.subscribe((event) => events.push(event));
   logger.info("request abc-secret", { connectorToken: "abc-secret", nested: { Authorization: "Bearer abc-secret" } });

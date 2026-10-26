@@ -4,6 +4,8 @@
 export interface ConnectionMetadata {
   id: string; name: string; networkId: string; telemetryEndpoint: string; missionSyncEndpoint: string;
   syncEndpoint?: string; exchangeRootOverride?: string; createdAt: string; updatedAt: string;
+  // Bridge 0.3.5: the last time the game sent telemetry through this connection (shown on its row).
+  lastPlayedAt?: string;
 }
 export interface ImportedConnection {
   name?: string; networkId: string; connectorToken: string; telemetryEndpoint: string; missionSyncEndpoint: string;

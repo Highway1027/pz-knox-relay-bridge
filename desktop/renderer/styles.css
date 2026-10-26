@@ -11,7 +11,7 @@ main{padding:16px}.view{display:none}.view.active{display:block}
 .inline{display:inline-flex!important;gap:6px;align-items:center;margin:0 8px 0 0!important}.inline input{width:auto}
 .game-status{margin:0 0 12px;padding:9px 12px;border:1px solid #2b3a42;border-left:4px solid #34434d;border-radius:6px;background:#151d22}.game-status.active{border-left-color:#4fa69a}.game-status.warn{border-left-color:#a3802e}.game-status.error{border-left-color:#87494c}.game-status small{display:block;color:#8fa1ac;margin-top:2px;font-size:12px}
 .rows{display:grid;gap:6px}.row{display:flex;align-items:center;gap:10px;border:1px solid #2b3a42;background:#151d22;border-radius:7px;padding:8px 8px 8px 12px}.row .name{flex:1;min-width:0}.row strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.row .error{font-size:12px;margin:2px 0 0}
-.add-button{margin-top:10px}
+.header-actions{display:flex;gap:6px;align-items:center}.header-actions .primary{padding:5px 11px}
 .panel{border:1px solid #2b3a42;background:#151d22;border-radius:8px;padding:14px;margin-bottom:12px}
 .muted{color:#82939c}.status{display:inline-flex;gap:7px;align-items:center;font-size:12px;color:#aebbc1;margin:0}.dot{width:8px;height:8px;border-radius:50%;background:#65747b;flex:none}.running .dot{background:#5dc39e;box-shadow:0 0 8px #5dc39e}.error-state .dot{background:#df6c71}
 .empty{text-align:center;color:#8ea0a9;padding:24px 0}.empty span{font-size:12px}
