@@ -19,7 +19,7 @@ Other parts: Connector (PZ Lua, gameplay authority) in `<drive>:\Game mods\Zombo
 | Tests | `npm test` (unset `ELECTRON_RUN_AS_NODE` in VS Code terminals first) |
 | Desktop dev | `npm run desktop` |
 | Windows package | `npm run desktop:pack` → `release/win-unpacked/Knox Relay Bridge.exe` |
-| Packaged smoke test | `node scripts/smoke-packaged.mjs --real-pz` (close PZ and other Bridges first) |
+| Packaged smoke test | `node scripts/smoke-packaged.mjs --real-pz` (close PZ and other Bridges first). It refuses when the real `KnoxRelay` folder holds game files; then don't touch them: make an empty folder with a `Zomboid\Lua` subfolder and run with `USERPROFILE` set to it |
 | Doctor | `npm run doctor` |
 | Mac source zip | `node scripts/package-mac-source.mjs` → `release/Knox Relay Bridge Source.zip` |
 

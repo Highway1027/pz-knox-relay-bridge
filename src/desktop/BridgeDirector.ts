@@ -105,9 +105,12 @@ export class BridgeDirector {
   }
 
   // Stops the running connection after its call in flight and tells the game at once ("stopped").
+  // 0.3.6: "stopped" is written before the wait, not after: quit waits at most 3 s, and a slow call in flight
+  // (backend down) left the game reading "active". Written again at the end, in case a tick's beat landed between.
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
+    if (this.beat > 0) await this.writeBeat([], true).catch(() => undefined);
     await this.busy?.catch(() => undefined);
     if (this.activeId) await this.options.runner.stopAndWait(this.activeId);
     this.activeId = undefined;
@@ -233,7 +236,7 @@ export class BridgeDirector {
 
   private async maybeBeat(connections: LinkConnection[], now: number, error: string | undefined): Promise<void> {
     const key = JSON.stringify([this.decision, this.activeId, error, connections.map((item) => [item.networkId, item.name])]);
-    if (key === this.lastBeatKey && now - this.lastBeatAt < BRIDGE_BEAT_MS) return;
+    if (this.stopped || (key === this.lastBeatKey && now - this.lastBeatAt < BRIDGE_BEAT_MS)) return;
     try {
       await this.writeBeat(connections, false, error);
       this.lastBeatKey = key;

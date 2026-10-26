@@ -170,6 +170,26 @@ test("director: idle without a game, runs the save's network, switches with the 
   } finally { await rm(f.exchangeDirectory, { recursive: true, force: true }); }
 });
 
+test("director: closing tells the game 'stopped' before the call in flight ends (quit waits only 3 s)", async () => {
+  const f = await directorFixture([A]);
+  try {
+    await f.writeGame(beat({ networkId: "netA" })); await f.director.tick();
+    assert.equal((await f.bridgeFile()).state, "active");
+    let release!: () => void;
+    const inFlight = new Promise<void>((resolve) => { release = resolve; });
+    f.runner.stopAndWait = async (id: string) => { await inFlight; f.runner.events.push(`stop ${id}`); f.runner.running = undefined; };
+    const stopping = f.director.stop();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal((await f.bridgeFile()).state, "stopped", "the game reads 'stopped' while the call is still in flight");
+    // A tick after close writes nothing.
+    await f.director.tick();
+    assert.equal((await f.bridgeFile()).state, "stopped");
+    release(); await stopping;
+    assert.equal((await f.bridgeFile()).state, "stopped");
+    assert.deepEqual(f.runner.events, ["start conn-a", "stop conn-a"]);
+  } finally { await rm(f.exchangeDirectory, { recursive: true, force: true }); }
+});
+
 test("director: an unlinked save or a network without a connection runs nothing and says why", async () => {
   const f = await directorFixture([A]);
   try {
