@@ -44,6 +44,11 @@ Same rules in every project (source: testing-format.md in Tim's ai-setup repo).
 - Plain text in steps: no bold, italics or backticks. A blank line between steps.
   Sub-steps on their own lines, indented under the step. Lines under about 90 characters.
 - A step earlier results make quite safe says "(assumed, based on <result>)": a glance.
+- Set-up a step needs (items, objects, sample data) comes from a test tool the build
+  adds, never from Tim spawning it by hand.
+- Each time a sitting is added or changed, re-read the whole file: one self-test run
+  per session of sittings, sittings that share a set-up merged, steps in the order Tim
+  walks through them.
 - Tim reports by id ("D3 failed"). A step he does not mention counts as passed.
 - Passed steps are removed, with one dated line under "Results so far" (newest first).
   When that list gets long, older lines move to TESTING_HISTORY.md.
