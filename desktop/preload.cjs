@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld("knox", {
   getAutoUpdate: () => ipcRenderer.invoke("update:auto:get"),
   setAutoUpdate: (enabled) => ipcRenderer.invoke("update:auto:set", enabled),
   checkForUpdate: () => ipcRenderer.invoke("update:check"),
+  // Bridge 0.3.6: newest version now and restart at once, even during a game.
+  forceUpdate: () => ipcRenderer.invoke("update:force"),
   lastUpdate: () => ipcRenderer.invoke("update:last"),
   onUpdateStatus: (listener) => {
     const handler = (_event, status) => listener(status);

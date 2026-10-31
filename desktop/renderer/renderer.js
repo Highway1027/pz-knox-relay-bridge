@@ -211,8 +211,8 @@ if (!window.knox) {
     if (!status) return;
     const when = status.checkedAt ? ` (checked ${new Date(status.checkedAt).toLocaleTimeString()})` : "";
     if (status.status === "installed") {
-      const running = [...state.statuses.values()].some((item) => item.state === "running");
-      showNotice("ready", `Knox Relay Bridge ${status.version} is ready.` + (running ? " Restarting stops running connections; otherwise it applies the next time you start the Bridge." : " Restart to use it."), false);
+      // Bridge 0.3.6: the Bridge restarts into it by itself once no game is running (UpdatePolicy).
+      showNotice("ready", `Knox Relay Bridge ${status.version} is ready. The Bridge restarts into it by itself as soon as no game is running.`, false);
       $("update-result").textContent = `Update ${status.version} is installed and runs after a restart.`;
       $("restart-app").hidden = false;
     } else if (status.status === "up-to-date") {
@@ -227,6 +227,13 @@ if (!window.knox) {
   $("banner-later").onclick = () => { clearTimeout(noticeTimer); $("update-banner").hidden = true; };
   $("banner-close").onclick = () => { clearTimeout(noticeTimer); $("update-banner").hidden = true; };
   $("check-update").onclick = async () => { $("update-result").textContent = "Checking for updates…"; showUpdateStatus({ ...(await api.checkForUpdate()), checkedAt: new Date().toISOString() }); };
+  $("force-update").onclick = async () => {
+    if (!confirm("Get the newest Bridge now and restart at once, even during a game? The game misses the Bridge for a few seconds; nothing is lost.")) return;
+    $("update-result").textContent = "Getting the newest version…";
+    const result = await api.forceUpdate();
+    // A new version restarts the Bridge before this answer arrives; only "up to date" or an error come back.
+    showUpdateStatus({ ...result, checkedAt: new Date().toISOString() });
+  };
   $("auto-update").onchange = async () => { await api.setAutoUpdate($("auto-update").checked); };
   api.onUpdateStatus(showUpdateStatus);
   (async () => { $("auto-update").checked = await api.getAutoUpdate(); showUpdateStatus(await api.lastUpdate()); })();
