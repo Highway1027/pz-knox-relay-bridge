@@ -13,6 +13,7 @@ import { DEFAULT_CONFIG, automaticPzDirectory, resolveExchangeDirectory } from "
 import { BridgeDirector, type DirectorStatus } from "./BridgeDirector.js";
 import { stat } from "node:fs/promises";
 import { AutoUpdater, type CheckResult } from "./AutoUpdater.js";
+import { AFTER_UPDATE_ARG, gameRunning, shouldRestart, type UpdateTrigger } from "./UpdatePolicy.js";
 import { MIN_CONTENT_HEIGHT, fittedContentHeight, keptOnScreen } from "./WindowFit.js";
 
 // Set by desktop/launcher.cjs. Absent when main.js is started directly (npm run desktop without the launcher).
@@ -45,13 +46,37 @@ async function readSettings(): Promise<{ autoUpdate: boolean }> {
   try { const value = JSON.parse(await readFile(settingsPath(), "utf8")) as { autoUpdate?: unknown }; return { autoUpdate: value.autoUpdate !== false }; }
   catch { return { autoUpdate: true }; }
 }
-async function checkForUpdate(): Promise<CheckResult | undefined> {
+// Bridge 0.3.6: an update installed this session waits here until UpdatePolicy allows the restart.
+let pendingVersion: string | undefined; let gameWasRunning = false; let restarting = false;
+const afterUpdateRestart = process.argv.includes(AFTER_UPDATE_ARG);
+async function checkForUpdate(trigger: UpdateTrigger = "interval"): Promise<CheckResult | undefined> {
   if (!updater) return undefined;
   const result = await updater.check();
+  if (result.status === "installed") pendingVersion = result.version;
   lastUpdate = { ...result, checkedAt: new Date().toISOString() };
   const target = window;
   if (target && !target.isDestroyed() && !target.webContents.isDestroyed()) target.webContents.send("update:status", lastUpdate);
+  if (shouldRestart({ trigger, pendingVersion, gameRunning: gameRunning(bridgeStatuses().map((status) => status.state)), afterUpdateRestart })) {
+    console.log(`[Knox Relay Bridge] Restarting into update ${pendingVersion} (${trigger}).`);
+    await restartApp(true);
+  }
   return result;
+}
+async function automaticCheck(trigger: UpdateTrigger): Promise<void> { if (updater && (await readSettings()).autoUpdate) await checkForUpdate(trigger); }
+// A game that just closed checks for an update (and restarts into a waiting one).
+function noteGameState(): void {
+  const running = gameRunning(bridgeStatuses().map((status) => status.state));
+  if (gameWasRunning && !running) void automaticCheck("game-closed").catch((error) => console.error(error));
+  gameWasRunning = running;
+}
+// afterUpdate marks the new process, so its open check does not restart again (UpdatePolicy).
+async function restartApp(afterUpdate: boolean): Promise<void> {
+  if (restarting) return;
+  restarting = true;
+  await stopDirectors(); shuttingDown = true; runtime?.stopAll();
+  const args = process.argv.slice(1).filter((item) => item !== AFTER_UPDATE_ARG);
+  app.relaunch({ args: afterUpdate ? [...args, AFTER_UPDATE_ARG] : args });
+  app.quit();
 }
 async function scheduleUpdates(): Promise<void> {
   if (!launcher || process.env.KNOX_SMOKE_REPORT || process.env.KNOX_DISABLE_AUTO_UPDATE) return;
@@ -63,9 +88,8 @@ async function scheduleUpdates(): Promise<void> {
     feedUrl: process.env.KNOX_UPDATE_FEED_URL,
     log: (message) => console.log(`[Knox Relay Bridge] ${message}`),
   });
-  const run = async () => { if ((await readSettings()).autoUpdate) await checkForUpdate(); };
-  setTimeout(() => { void run(); }, UPDATE_FIRST_CHECK_MS);
-  setInterval(() => { void run(); }, UPDATE_INTERVAL_MS);
+  setTimeout(() => { void automaticCheck("open"); }, UPDATE_FIRST_CHECK_MS);
+  setInterval(() => { void automaticCheck("interval"); }, UPDATE_INTERVAL_MS);
 } let store: ConnectionStore; let runtime: BridgeRuntimeManager; let shuttingDown = false; let smokeInProgress = false;
 // Bridge 0.3.0: the Bridge follows the game (BridgeDirector), one director per exchange folder. Log lines of the
 // directors go to the Debug tab under BRIDGE_LOG_ID.
@@ -95,7 +119,7 @@ async function refreshDirectors(): Promise<void> {
       connections: async () => (await store.list()).filter((connection) => exchangeOf(connection.exchangeRootOverride).directory === directory),
       ready: async () => !automatic || isDirectory(automaticPzDirectory()),
       log: (level, message) => sendToWindow("runtime:log", BRIDGE_LOG_ID, { timestamp: new Date().toISOString(), level, message }),
-      onChange: () => sendToWindow("bridge:status", bridgeStatuses()),
+      onChange: () => { sendToWindow("bridge:status", bridgeStatuses()); noteGameState(); },
     });
     directors.set(directory, director); director.start();
   }
@@ -150,9 +174,12 @@ function registerIpc(): void {
   ipcMain.handle("update:auto:get", async () => (await readSettings()).autoUpdate);
   ipcMain.handle("update:auto:set", async (_event, enabled: boolean) => { await writeFile(settingsPath(), `${JSON.stringify({ autoUpdate: enabled === true }, null, 2)}\n`, "utf8"); return enabled === true; });
   ipcMain.handle("update:check", async () => (await checkForUpdate()) ?? { status: "error", reason: "Automatic updates need the update launcher; rebuild the Bridge once." });
+  // Bridge 0.3.6: Settings > Force update: newest version now, restart at once even during a game (hotfix).
+  ipcMain.handle("update:force", async () => (await checkForUpdate("force")) ?? { status: "error", reason: "Updates need the update launcher; rebuild the Bridge once." });
   ipcMain.handle("update:last", () => lastUpdate ?? null);
   ipcMain.handle("update:revert", () => { launcher?.revertToBuiltIn(); return { ok: true }; });
-  ipcMain.handle("app:restart", async () => { await stopDirectors(); shuttingDown = true; runtime?.stopAll(); app.relaunch(); app.quit(); });
+  // A restart by hand opens like a fresh start: its open check may restart once more into a new update.
+  ipcMain.handle("app:restart", () => restartApp(false));
   ipcMain.handle("legacy:import", async (_event, name: string) => { const raw = await legacy(); if (!raw) throw new Error("Legacy config.json was not found"); return store.add(parseConnectionImport({ telemetryEndpoint: DEFAULT_CONFIG.telemetryEndpoint, missionSyncEndpoint: DEFAULT_CONFIG.missionSyncEndpoint, ...raw }), name); });
 }
 async function createWindow(): Promise<void> {

@@ -52,7 +52,7 @@ Before public distribution: add production icons and metadata, configure code-si
 
 ## Drop-in updates (since 0.2.0)
 
-Install the app once; later versions arrive as signed code updates. The Bridge downloads them itself from the latest GitHub Release (15 seconds after start, then every 6 hours; Settings → "Update automatically" turns this off), or a ZIP can be picked in **Settings → Install update file…**. No rebuild, no Gatekeeper or Keychain prompts, connections kept. A downloaded update is installed at once and runs after the next restart; a banner offers "Restart now" or "Later".
+Install the app once; later versions arrive as signed code updates. The Bridge downloads them itself from the latest GitHub Release (15 seconds after start, then every 6 hours; Settings → "Update automatically" turns this off), or a ZIP can be picked in **Settings → Install update file…**. No rebuild, no Gatekeeper or Keychain prompts, connections kept. A downloaded update is installed at once and runs after the next restart. **Restarts by itself (0.3.6, Tim 31-10-2026, `src/desktop/UpdatePolicy.ts`):** the check right after the Bridge opens restarts into a new update at once, even while a game runs (the game misses the Bridge for a few seconds; nothing is lost). Later checks (every 6 hours, and every time a game closes) restart only while no game is running; a waiting update restarts as soon as the game closes. A restart made by an update starts with `--knox-after-update`, so its own open check never restarts again (no loop if an update fails to start). A restart by hand counts as a fresh open. **Settings → Force update** gets the newest version and restarts at once, also during a game, for a hotfix. The banner still offers "Restart now".
 
 How it works:
 

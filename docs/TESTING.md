@@ -1,44 +1,54 @@
-<!-- docs/TESTING.md -->
-<!-- v7 - 26-09-2026 - Document first-run configuration workflow -->
+# Knox Relay Bridge testing
 
-# Testing
+Blocking right now: nothing.
 
-`npm test` verifies the Phase 2 transport plus telemetry POST association/authentication, retry recovery, and stale-snapshot coalescing.
+Automated checks: npm test (transport, telemetry, retry, protocol validators) and the
+packaged smoke test (node scripts/smoke-packaged.mjs --real-pz, see AGENTS.md).
+Rules: last section.
 
-## Experimental global audio probe (Bridge 0.2.8)
+Bridge hand tests usually run inside a Knox Mission Board sitting (its docs/TESTING.md),
+because the Bridge only shows its work together with the mod and the webapp.
 
-This requires the Connector 0.20.0 build and deployed `knoxQueueTtsAudio` and
-`knoxAudioSync` functions. Only the host needs the Bridge.
+---
 
-1. Start the host Bridge and a hosted Project Zomboid game. Join from a second client.
-2. In the webapp Development tab, generate and send one fresh TTS clip (about 11 seconds).
-3. Confirm the Bridge logs the WAV as queued and the game server logs its broadcast.
-4. Confirm both host and remote client can actually hear the clip. Do not treat the webapp's
-   queue confirmation or the Connector's start log as proof of audible playback.
-5. Record any Java/Kahlua or mixer errors from `console.txt`. Players do not install audio
-   files or run a Bridge.
+No open sittings.
 
-## Manual B42.20.4 telemetry gate
+## Results so far
 
-1. After deployment approval, run `npm start` and enter the selected Network ID and token in the first-run wizard, or supply the documented environment variables.
-2. Install the current Connector, start the Bridge, then start the B42.20.4 coop server.
-3. Join and move; confirm Bridge logs `game_telemetry` and `telemetry accepted`.
-4. Confirm `knoxRelayFiles/{networkId}/gameTelemetry/current` changes and the web panel shows the same character and coordinates.
-5. Move again and confirm the one current document updates; connect the second player and confirm both appear.
-6. Briefly make `telemetryEndpoint` unreachable. Confirm gameplay continues and retry logs remain concise; restore it and confirm the newest snapshot succeeds.
+- 27-10-2026: file moved to the shared format. The old gates below passed or are
+  outdated; their full steps are in git history (docs/TESTING.md before 27-10-2026).
+- Phase 4 gate (test mission to PZ, restart, no repeats): passed on B42.20.4.
+- Telemetry gate on B42.20.4 and Phase 5A schema check: passed, superseded by later Knox
+  sittings.
+- Experimental global audio probe (Bridge 0.2.8, Connector 0.20.0): no result recorded;
+  see docs/PROTOCOL.md "Experimental global audio test" if it comes back.
 
-## Phase 4 gate
+## How this file works
 
-Historical: passed; the `test_001` mission used here was removed in Bridge 0.2.5 (30-09-2026).
+Same rules in every project (source: testing-format.md in Tim's ai-setup repo).
 
-Start Bridge and B42.20.4, then use Network Settings → Connector Setup → Send Test Mission to PZ. Confirm the Bridge logs mission receipt/queue and PZ logs `Mission received: test_001 - Connector Test Mission`. Confirm PZ's acknowledgement moves both local files to processed. Restart Bridge/PZ and confirm the mission is not recreated or logged forever.
-
-Do not begin native mission UI or gameplay until Tim confirms this gate.
-
-Runtime result: passed on B42.20.4, including full Bridge/PZ restart and repeated web-action deduplication. Phase 4 is complete.
-
-## Phase 5A preparation
-
-`npm test` must confirm that mission version 1 and the fixed objective text are required
-before any mission file is written. Rebuild and restart the Bridge after this schema change.
-The real native-panel/reconnect/restart gate is documented in the Connector repository.
+- Automated first: unit tests and the self-test check what a script can. This file
+  holds only what they cannot: the look, real clicks and keys, a second player or
+  device, real AI text, live data.
+- "Blocking right now" names only a test whose result changes the next step.
+- A sitting is one topic Tim can test in one go, with an estimated time.
+- Each sitting takes the next letter (after Z start at A again). Steps use that letter:
+  D1, D2, sub-steps D2.1. A big sitting can have parts; each part takes the next letter.
+- "Before you start" holds only what Tim must do or check, and how he sees he has the
+  right build (which version, shown where). The agent builds, installs and deploys
+  beforehand; if it could not, the sitting says what Tim must do instead.
+- When a self-test or scenario covers part of a sitting, the first step runs it and
+  says which result to expect.
+- One action per line, then what you should see on its own line, starting with "-> ".
+- Name the exact button, menu, page or test tool.
+- Plain text in steps: no bold, italics or backticks. A blank line between steps.
+  Sub-steps on their own lines, indented under the step. Lines under about 90 characters.
+- A step earlier results make quite safe says "(assumed, based on <result>)": a glance.
+- Set-up a step needs (items, objects, sample data) comes from a test tool the build
+  adds, never from Tim spawning it by hand.
+- Each time a sitting is added or changed, re-read the whole file: one self-test run
+  per session of sittings, sittings that share a set-up merged, steps in the order Tim
+  walks through them.
+- Tim reports by id ("D3 failed"). A step he does not mention counts as passed.
+- Passed steps are removed, with one dated line under "Results so far" (newest first).
+  When that list gets long, older lines move to TESTING_HISTORY.md.
